@@ -1,6 +1,7 @@
 import { component } from ".";
 import { generateQuixOutput } from "./generator";
 import { h } from "./h";
+import { logger } from "./logger";
 
 const App = component("App")
   .state("count", 0)
@@ -10,8 +11,8 @@ const App = component("App")
     h("div", null,
       h("h1", null, "Counter"),
       h("button", { onClick:handlers.click }, "Increment x2"),
-      h("p", null, () => `Value: ${state.double()}`) // コンパイラが関数化した想定
+      h("p", null,'Value: ',state.double()) // コンパイラが関数化した想定
     )
   ));
 
-console.log(generateQuixOutput(App))
+logger.log(generateQuixOutput(App))
