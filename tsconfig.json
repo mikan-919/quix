@@ -1,12 +1,10 @@
 {
   "compilerOptions": {
-    // Environment setup & latest features
-    "lib": ["ESNext"],
-    "target": "ESNext",
-    "module": "Preserve",
-    "moduleDetection": "force",
-    "jsx": "react-jsx",
-    "allowJs": true,
+    "module": "ESNext",
+       "target": "ESNext",
+       "declaration": true,
+       "jsx": "preserve", // JSXの解析は自分でするので、勝手に変換させない
+       "esModuleInterop": true,
 
     // Bundler mode
     "moduleResolution": "bundler",

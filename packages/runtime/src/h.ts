@@ -1,4 +1,8 @@
+import { consola } from 'consola'
+import { nanoid } from 'nanoid'
 import { quixTracker } from './tracker'
+
+// --- 型定義 ---
 
 export type Instruction = {
   signalId: string
@@ -8,135 +12,283 @@ export type Instruction = {
   attrName?: string
 }
 
+export type HiddenDerivedEntry = {
+  id: string
+  deps: string[]
+  fn: (scope: any) => any
+}
+
 export type VNode = {
   tag: string
   html: string
   instructions: Instruction[]
+  hiddenDerived: HiddenDerivedEntry[]
 }
 
-let qidCounter = 0
-const generateQid = () => `q-${qidCounter++}`
+const logger = consola.withTag('h-func')
 
-// --- 1. 属性とハンドラの分離 ---
-function processAttributes(props: any, qid: string) {
+/**
+ * 形式チェック: (s) => s.count() または () => state.count() から "count" を抽出
+ */
+function extractMethodName(fn: Function): string | undefined {
+  const code = fn.toString().trim()
+  // 1. (s) => s.method()
+  const matchWithArg = code.match(
+    /^\(\s*[a-zA-Z_$][\w$]*\s*\)\s*=>\s*[a-zA-Z_$][\w$]*\.([a-zA-Z_$][\w$]*)\(\)$/
+  )
+  if (matchWithArg) return matchWithArg[1]
+
+  // 2. () => state.method()
+  const matchNoArg = code.match(
+    /^\(\s*\)\s*=>\s*[a-zA-Z_$][\w$]*\.([a-zA-Z_$][\w$]*)\(\)$/
+  )
+  if (matchNoArg) return matchNoArg[1]
+
+  return undefined
+}
+
+/**
+ * 動的パーツ（関数）を解析し、テンプレート用のキーと命令用のIDを決定する
+ */
+function processDynamicPart(
+  fn: Function,
+  prefix: string,
+  hiddenDerived: HiddenDerivedEntry[]
+): { instructionId: string; accessKey: string; initial: any } {
+  const deps: string[] = []
+  const initial = quixTracker.track(fn as any, id => {
+    if (!deps.includes(id)) deps.push(id)
+  })
+
+  const methodName = extractMethodName(fn)
+
+  // A. 短絡可能なパススルー形式
+  if (methodName && deps.length > 0) {
+    logger.info(
+      `Optimization | Passthrough detected: "${methodName}" (ID: ${deps[0]})`
+    )
+    return {
+      instructionId: deps[0]!, // 根本のIDで発火させる
+      accessKey: methodName, // テンプレート内ではユーザー定義名で呼ぶ
+      initial,
+    }
+  }
+
+  // B. 複雑なロジックを含む場合は HiddenDerived 化
+  const hdId = `${prefix}-${nanoid(6)}`
+  hiddenDerived.push({ id: hdId, deps, fn: fn as any })
+
+  logger.info(`Extraction   | Complex function wrapped as: ${hdId}`)
+  return {
+    instructionId: hdId,
+    accessKey: hdId,
+    initial,
+  }
+}
+
+// --- 1. 属性解析モジュール ---
+
+function parseAttributes(props: any, qid: string) {
   const instructions: Instruction[] = []
-  const filteredProps: Record<string, string> = {}
+  const hiddenDerived: HiddenDerivedEntry[] = []
+  const staticProps: Record<string, string> = {}
   let needsQid = false
 
-  if (!props) return { attrString: '', instructions, needsQid }
+  if (!props) return { attrString: '', instructions, hiddenDerived, needsQid }
 
-  for (const [k, v] of Object.entries(props)) {
-    if (typeof v === 'string' && v.startsWith('{{HANDLER:')) {
-      const handlerName = v.replace('{{HANDLER:', '').replace('}}', '')
+  for (const [key, value] of Object.entries(props)) {
+    // イベントハンドラ
+    if (typeof value === 'string' && value.startsWith('{{HANDLER:')) {
+      const handlerName = value.replace('{{HANDLER:', '').replace('}}', '')
       instructions.push({
         signalId: handlerName,
         selector: `.${qid}`,
         path: [],
         action: 'addListener',
-        attrName: k.toLowerCase().replace('on', ''),
+        attrName: key.toLowerCase().replace(/^on/, ''),
       })
       needsQid = true
-    } else {
-      filteredProps[k] = String(v)
+    }
+    // 動的属性
+    else if (typeof value === 'function') {
+      const { instructionId, initial } = processDynamicPart(
+        value,
+        'hd-attr',
+        hiddenDerived
+      )
+      instructions.push({
+        signalId: instructionId,
+        selector: `.${qid}`,
+        path: [],
+        action: 'setAttr',
+        attrName: key,
+      })
+      staticProps[key] = String(initial)
+      needsQid = true
+    }
+    // 静的属性
+    else {
+      staticProps[key] = String(value)
     }
   }
 
-  const attrString = Object.entries(filteredProps)
+  const attrString = Object.entries(staticProps)
     .map(([k, v]) => `${k}="${v}"`)
     .join(' ')
-
-  return { attrString, instructions, needsQid }
+  return { attrString, instructions, hiddenDerived, needsQid }
 }
 
-// --- 2. 子供の解析と最適化判定 ---
-function processChildren(children: any[], qid: string) {
-  const flatChildren = children.flat()
-  const isAllText = flatChildren.every(
-    c =>
-      typeof c === 'string' || typeof c === 'number' || typeof c === 'function'
-  )
-  const hasDynamic = flatChildren.some(c => typeof c === 'function')
+// --- 2. 子要素解析モジュール ---
 
-  return { flatChildren, isAllText, hasDynamic }
-}
-
-// --- 3. メインのオーケストレーター ---
-export function h(tag: string, props: any, ...children: any[]): VNode {
-  const qid = generateQid()
-  const myDeps = new Set<string>()
-
-  // 💡 スコープ開始：この要素の処理中に発生する report を myDeps で回収する
-  quixTracker.beginScope(qid, id => myDeps.add(id))
-
-  // 1. 属性処理
-  let {
-    attrString,
-    instructions: propInsts,
-    needsQid,
-  } = processAttributes(props, qid)
-
-  // 2. 子供の分類
-  const { flatChildren, isAllText, hasDynamic } = processChildren(children, qid)
-
+function parseChildren(children: any[], qid: string) {
+  const instructions: Instruction[] = []
+  const hiddenDerived: HiddenDerivedEntry[] = []
   const processedHtml: string[] = []
-  const childInsts: Instruction[] = []
+  let needsQid = false
 
-  // 3. 具体的なレンダリングとバブリング
-  if (isAllText && hasDynamic) {
-    // 💡 テキスト結合最適化：全員実行して一つの文字列にする
-    needsQid = true
-    const content = flatChildren
-      .map(c => (typeof c === 'function' ? c() : c))
-      .join('')
-    processedHtml.push(content)
-  } else {
-    // 💡 通常の再帰・インデックス管理
-    flatChildren.forEach((child, index) => {
-      if (typeof child === 'function') {
-        needsQid = true
-        processedHtml.push(String(child()))
-      } else if (
-        child &&
-        typeof child === 'object' &&
-        'instructions' in child
-      ) {
-        // 子の命令を吸い上げる
-        childInsts.push(...(child as VNode).instructions)
-        processedHtml.push((child as VNode).html)
-      } else {
-        processedHtml.push(String(child))
+  let buffer: any[] = []
+
+  const flushBuffer = () => {
+    if (buffer.length === 0) return
+
+    const nodeIndex = processedHtml.length
+    const hasFunction = buffer.some(item => typeof item === 'function')
+
+    if (!hasFunction) {
+      processedHtml.push(buffer.join(''))
+    } else {
+      let finalSignalId: string
+      let finalInitialValue: any
+
+      // テンプレートセグメントが単一の関数のみの場合（最適化）
+      if (buffer.length === 1 && typeof buffer[0] === 'function') {
+        const { instructionId, initial } = processDynamicPart(
+          buffer[0],
+          'hd-txt',
+          hiddenDerived
+        )
+        finalSignalId = instructionId
+        finalInitialValue = initial
       }
-    })
+      // 混合テンプレートリテラルの生成
+      else {
+        const templateHdId = `hd-tmpl-${nanoid(6)}`
+        let templateLiteralBody = ''
+        let combinedInitial = ''
+        const allDeps = new Set<string>()
+
+        buffer.forEach(item => {
+          if (typeof item === 'function') {
+            const { instructionId, accessKey, initial } = processDynamicPart(
+              item,
+              'hd-txt',
+              hiddenDerived
+            )
+            templateLiteralBody += `\${s["${accessKey}"]()}`
+            combinedInitial += initial
+            allDeps.add(instructionId)
+          } else {
+            const str = String(item)
+            // テンプレートリテラル内の特殊文字をエスケープ
+            templateLiteralBody += str.replace(/[`\\$]/g, '\\$&')
+            combinedInitial += str
+          }
+        })
+
+        // (s) => `...` 形式の関数をコンパイル
+        const compiledFn = new Function(
+          's',
+          `return \`${templateLiteralBody}\``
+        ) as (s: any) => any
+        hiddenDerived.push({
+          id: templateHdId,
+          deps: Array.from(allDeps),
+          fn: compiledFn,
+        })
+
+        finalSignalId = templateHdId
+        finalInitialValue = combinedInitial
+        logger.info(
+          `Template     | Generated segment ${templateHdId}: \`${templateLiteralBody}\``
+        )
+      }
+
+      instructions.push({
+        signalId: finalSignalId,
+        selector: `.${qid}`,
+        path: [nodeIndex],
+        action: 'setText',
+      })
+      processedHtml.push(String(finalInitialValue ?? ''))
+      needsQid = true
+    }
+    buffer = []
   }
 
-  // 💡 スコープ終了：ここまでの report 回収を終える
-  quixTracker.endScope()
+  for (const child of children.flat()) {
+    // VNode(タグ)が現れたらバッファを切り出す
+    if (child && typeof child === 'object' && 'html' in child) {
+      flushBuffer()
+      const vchild = child as VNode
+      instructions.push(...vchild.instructions)
+      hiddenDerived.push(...vchild.hiddenDerived)
+      processedHtml.push(vchild.html)
+    } else {
+      buffer.push(child ?? '')
+    }
+  }
 
-  // 💡 4. 回収した依存(myDeps)を元に命令を生成
-  myDeps.forEach(signalId => {
-    // 属性(handler)として既に登録済みのIDはテキスト更新からは除外
-    if (propInsts.some(i => i.signalId === signalId)) return
+  // ループ終了後に残ったバッファを処理
+  flushBuffer()
 
-    childInsts.push({
-      signalId,
-      selector: `.${qid}`,
-      path: isAllText ? [] : [0 /* 実際にはindexが必要 */],
-      action: 'setText',
-    })
-  })
+  return { html: processedHtml.join(''), instructions, hiddenDerived, needsQid }
+}
 
-  // 5. 最終的なHTML組み立て
-  const finalNeedsQid =
-    needsQid || propInsts.length > 0 || childInsts.length > 0
-  const finalAttr = finalNeedsQid
-    ? attrString
-      ? `class="${qid}" ${attrString}`
-      : `class="${qid}"`
-    : attrString
+// --- 3. メインオーケストレーター ---
+
+export function h(tag: string, props: any, ...children: any[]): VNode {
+  const qid = `q-${nanoid(6)}`
+
+  const attrResult = parseAttributes(props, qid)
+  const childResult = parseChildren(children, qid)
+
+  const finalInstructions = [
+    ...attrResult.instructions,
+    ...childResult.instructions,
+  ]
+  const finalHiddenDerived = [
+    ...attrResult.hiddenDerived,
+    ...childResult.hiddenDerived,
+  ]
+  const needsQid = attrResult.needsQid || childResult.needsQid
+
+  // クラス名の統合
+  const classList: string[] = []
+  if (needsQid) classList.push(qid)
+
+  // 属性文字列の構築
+  let attrMarkup = attrResult.attrString ? ` ${attrResult.attrString}` : ''
+  if (needsQid) {
+    // 既存の class 属性がある場合は結合、なければ新設
+    if (attrMarkup.includes('class="')) {
+      attrMarkup = attrMarkup.replace('class="', `class="${qid} `)
+    } else {
+      attrMarkup = ` class="${qid}"${attrMarkup}`
+    }
+  }
+
+  const html = `<${tag}${attrMarkup}>${childResult.html}</${tag}>`
+
+  if (needsQid) {
+    logger.info(
+      `VNode [${tag}] | ID: ${qid}, Instructions: ${finalInstructions.length}, HiddenDerived: ${finalHiddenDerived.length}`
+    )
+  }
 
   return {
     tag,
-    html: `<${tag}${finalAttr ? ' ' + finalAttr : ''}>${processedHtml.join('')}</${tag}>`,
-    instructions: [...propInsts, ...childInsts],
+    html,
+    instructions: finalInstructions,
+    hiddenDerived: finalHiddenDerived,
   }
 }

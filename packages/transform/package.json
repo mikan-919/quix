@@ -1,0 +1,11 @@
+{
+  "name": "@quix/transform",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@babel/core": "^7.23.0",
+    "@babel/plugin-transform-react-jsx": "^7.22.0",
+    "@babel/preset-typescript": "^7.23.0"
+  }
+}

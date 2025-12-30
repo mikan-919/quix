@@ -1,182 +1,171 @@
-import { logger } from './logger'
+import { type ConsolaInstance, consola } from 'consola'
 import { nanoid } from 'nanoid'
+import type { VNode } from './h' // 分割した h.ts から VNode 型をインポート
 import { quixTracker } from './tracker'
-import type { Instruction, VNode } from './h'
+
+/** メタデータ構造 */
+type StateMeta<V> = { value: V }
+type DerivedMeta<V, Deps extends string> = { value: V; deps: Deps }
+type HandlerMeta<Deps extends string> = { deps: Deps }
+
+type ResolveValue<T> = T extends { value: infer V } ? V : never
+
+type ExtractReaders<S, D> = Simplify<{
+  [K in keyof (S & D)]: () => ResolveValue<(S & D)[K]>
+}>
+
+type ExtractSignals<S, D, Keys extends keyof (S & D)> = Simplify<{
+  [K in Keys]: K extends keyof S
+    ? (update?: ResolveValue<S[K]>) => ResolveValue<S[K]>
+    : () => ResolveValue<(S & D)[K]>
+}>
+
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
-type ToSignal<T> = {
-	[K in keyof T]: (update?: T[K]) => T[K]
-}
-type ToReader<T> = {
-	[K in keyof T]: () => T[K]
-}
-type StateBankEntry<V> = {
-	id: string
-	value: V
-	isDerived: false
-}
-type DerivedBankEntry<V, TState, TDerived> = {
-	id: string
-	value: (state: ToReader<TState & TDerived>) => V
-	isDerived: true
-}
-type HandlerSignals<TState, TDerived> = ToSignal<TState> & ToReader<TDerived>;
-type HandlerFn<TState, TDerived> = (signals: HandlerSignals<TState, TDerived>) => void;
 
-
-class Component<
-	TState extends Record<string, any> = {},
-	TDerived extends Record<string, any> = {},
-	TProps = {},
-	THandlers = {},
+export class ComponentBuilder<
+  S extends Record<string, StateMeta<unknown>> = {},
+  D extends Record<string, DerivedMeta<unknown, string>> = {},
+  H extends Record<string, HandlerMeta<string>> = {},
 > {
-	name: string
-	private stateBank: Simplify<
-		{
-			[P in keyof TState]: StateBankEntry<TState[P]>
-		} & {
-			[P in keyof TDerived]: DerivedBankEntry<TDerived[P], TState, TDerived>
-		}
-	> = {} as any
-	private handlerBank: Record<string, HandlerFn<TState,TDerived>> = {};
-
-
-	private createReaderProxy(): ToReader<TState & TDerived> {
-    return new Proxy<ToReader<TState & TDerived>>({} as any, {
-        get: (_, key) => {
-            const k = key as keyof (TState & TDerived)
-            const entry = (this.stateBank as any)[k] as
-                | StateBankEntry<any>
-                | DerivedBankEntry<any, TState, TDerived>
-            if (!entry) return undefined
-
-            return () => {
-                // 💡 呼ばれたことを報告（スタックの頂上の h スコープに届く）
-                quixTracker.report(entry.id);
-
-                if (entry.isDerived) {
-                    // 💡 Derived の内部実行は silence し、依存の重複を防ぐ
-            return quixTracker.silence(() => {
-              return entry.value(this.createReaderProxy());
-                });
-                }
-                return entry.value;
-            };
-        },
-    }) as ToReader<TState & TDerived>
-}
-	private createSignalProxy(): HandlerSignals<TState, TDerived> {
-  return new Proxy({} as any, {
-    get: (_, key: string) => {
-      const entry = (this.stateBank as any)[key] as
-        | StateBankEntry<any>
-        | DerivedBankEntry<any, TState, TDerived>;
-
-      if (!entry) return undefined;
-
-      if (!entry.isDerived) {
-        return (update?: any) => {
-          if (update !== undefined) {
-            logger.debug(`Handler-Set | State[${entry.id}] -> ${update}`);
-            return update;
-          }
-          return entry.value;
-        };
-      }
-      return () => {
-        logger.debug(`Handler-Get | Derived[${entry.id}] read`);
-        return entry.value(this.createReaderProxy());
-      };
-    },
-  }) as any;
-}
-	constructor(name: string) {
-		this.name = name
-		logger.info(`Component | ${name}`)
-	}
-
-	state<K extends string, V>(
-		key: K,
-		value: V
-	): Component<TState & Record<K, V>, TDerived, TProps, THandlers> {
-		;(this.stateBank as any)[key] = {
-			id: nanoid(),
-			value: value,
-			isDerived: false,
-		}
-
-		logger.info(`State | ${key} : ${typeof value}`)
-		return this as any
-	}
-	derived<K extends string, V>(
-  key: K,
-  fn: (state: ToReader<TState & TDerived>) => V
-): Component<TState, TDerived & Record<K, V>, TProps, THandlers> {
-  const id = nanoid();
-  const deps = new Set<string>();
-
-  quixTracker.track(
-    () => fn(this.createReaderProxy()),
-    (depId) => deps.add(depId)
-  );
-
-  (this.stateBank as any)[key] = {
-    id,
-    value: fn,
-    isDerived: true,
-  } as DerivedBankEntry<V, TState, TDerived>;
-
-  logger.info(`Derived | ${key} [${id}] (depends on: ${Array.from(deps).join(', ')})`);
-  return this as any;
-}
-
-handler<K extends string>(
-  key: K,
-  fn: HandlerFn<TState,TDerived>
-): Component<TState, TDerived, TProps, THandlers & Record<K, HandlerFn<TState,TDerived>>> {
-
-  this.handlerBank[key] = fn;
-  logger.info(`Handler | ${key} registered`);
-  return this as any;
-}
-render(
-  fn: (args: {
-    state: ToReader<TState & TDerived>;
-    handlers: THandlers;
-  }) => VNode
-) {
-  logger.info(`Render  | Analyzing structure: ${this.name}`);
-  const handlerProxy = new Proxy({} as any, {
-    get: (_, key: string) => `{{HANDLER:${key}}}`
-  });
-  const rootVNode = fn({
-    state: this.createReaderProxy(),
-    handlers: handlerProxy as THandlers
-  });
-
-  const manifest = {
-    name: this.name,
-    html: rootVNode.html,
-    updateMap: {} as Record<string, Instruction[]>
-  };
-
-  rootVNode.instructions.forEach(inst => {
-    if (!manifest.updateMap[inst.signalId]) {
-      manifest.updateMap[inst.signalId] = [];
+  // 全ての State / Derived (Hidden含む) を格納する
+  private bank: Record<
+    string,
+    {
+      id: string
+      value: any
+      deps?: string[]
+      isDerived: boolean
     }
-    manifest.updateMap[inst.signalId]?.push(inst);
-  });
+  > = {}
 
-  logger.success(`Render  | Found ${rootVNode.instructions.length} dynamic bindings`);
-  rootVNode.instructions.forEach((inst, i) => {
-    logger.info(`Binding ${i}: ${inst.signalId} at path [${inst.path}] (${inst.action})`);
-  });
-  logger.info(`Manifest | ${JSON.stringify(manifest, (key, value) => {
-      return typeof value === 'function' ? value.toString() : value;
-    })}`);
-  return manifest;
-}
+  private handlerBank: Record<string, Function> = {}
+  private logger: ConsolaInstance
+  constructor(public name: string) {
+    this.logger = consola.withTag(this.name)
+    this.logger.start(`Building: ${name}`)
+  }
+
+  private next<
+    NS extends Record<string, StateMeta<unknown>>,
+    ND extends Record<string, DerivedMeta<unknown, string>>,
+    NH extends Record<string, HandlerMeta<string>>,
+  >(): ComponentBuilder<NS, ND, NH> {
+    return this as any
+  }
+
+  /** ユーザー定義 State */
+  state<K extends string, V>(key: K, value: V) {
+    const id = nanoid()
+    this.bank[key] = { id, value, isDerived: false }
+    this.logger.info(`State   | ${key} (id: ${id})`)
+    return this.next<Simplify<S & Record<K, StateMeta<V>>>, D, H>()
+  }
+
+  /** ユーザー定義 Derived */
+  derived<K extends string, V, Keys extends keyof (S & D)>(
+    key: K,
+    deps: Keys[],
+    fn: (scope: ExtractReaders<S, D>) => V
+  ) {
+    const id = nanoid()
+    // 名前ベースの依存関係を内部IDベースに変換
+    const depIds = deps.map(k => (this.bank[k as string] as any).id)
+
+    this.bank[key] = { id, deps: depIds, value: fn, isDerived: true }
+    this.logger.info(`Derived | ${key} (deps: ${deps.join(', ')})`)
+    return this.next<
+      S,
+      Simplify<D & Record<K, DerivedMeta<V, Keys & string>>>,
+      H
+    >()
+  }
+
+  /** イベントハンドラ */
+  handler<K extends string, Keys extends keyof (S & D)>(
+    key: K,
+    _deps: Keys[],
+    fn: (scope: ExtractSignals<S, D, Keys>) => void
+  ) {
+    this.handlerBank[key] = fn
+    this.logger.info(`Handler | ${key} registered`)
+    return this.next<
+      S,
+      D,
+      Simplify<H & Record<K, HandlerMeta<Keys & string>>>
+    >()
+  }
+
+  /** 解析・マージ実行 */
+  render(
+    fn: (args: {
+      state: ExtractReaders<S, D>
+      handlers: Simplify<{ [K in keyof H]: string }>
+    }) => VNode
+  ) {
+    // 1. 解析用の Scope 生成
+    const allKeys = Object.keys(this.bank)
+    const stateScope = this.createScope(allKeys, false)
+    const handlerNames = Object.fromEntries(
+      Object.keys(this.handlerBank).map(k => [k, `{{HANDLER:${k}}}`])
+    )
+    this.logger.info('handler: ', handlerNames)
+    // 2. JSX(h関数)の実行
+    const vnode = fn({ state: stateScope, handlers: handlerNames as any })
+
+    // 3. Hidden Derived を bank に統合
+    for (const hd of vnode.hiddenDerived) {
+      // 本質的に derived と同じ形式で格納
+      this.bank[hd.id] = {
+        id: hd.id,
+        deps: hd.deps, // h関数が track した ID がそのまま入る
+        value: hd.fn,
+        isDerived: true,
+      }
+    }
+
+    this.logger.success(
+      `Render analyzed: ${Object.keys(this.bank).length} total nodes in graph`
+    )
+
+    return {
+      version: '0.1',
+      name: this.name,
+      bank: this.bank, // ユーザー定義 + Hidden が混ざった状態
+      handlerBank: this.handlerBank,
+      html: vnode.html,
+      instructions: vnode.instructions,
+    }
+  }
+
+  /** 依存追跡機能付き Scope 生成 */
+  private createScope(keys: string[], writable: boolean): any {
+    const scope: any = {}
+    for (const key of keys) {
+      const entry = this.bank[key]
+      if (!entry) continue
+
+      const getter = () => {
+        // 💡 依存関係を報告（これが h関数の track に回収される）
+        quixTracker.report(entry.id)
+
+        if (entry.isDerived) {
+          // 派生値の計算（再帰）
+          return entry.value(this.createScope(Object.keys(this.bank), false))
+        }
+        return entry.value
+      }
+
+      if (writable && !entry.isDerived) {
+        scope[key] = (update?: any) => {
+          if (arguments.length > 0) entry.value = update
+          return getter()
+        }
+      } else {
+        scope[key] = getter
+      }
+    }
+    return scope
+  }
 }
 
-export function component(name: string) {
-	return new Component(name)
-}
+export const component = (name: string) => new ComponentBuilder(name)

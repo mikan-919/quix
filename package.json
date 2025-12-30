@@ -1,12 +1,17 @@
 {
-  "name": "quix",
-  "module": "index.ts",
-  "type": "module",
-  "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
+  "name": "quix-monorepo",
+  "workspaces": [
+    "packages/*",
+    "playground"
+  ],
+  "scripts": {
+    "dev": "bun --filter playground dev"
   },
-  "peerDependencies": {
+  "devDependencies": {
+    "@types/bun": "latest",
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@biomejs/biome": "^2.3.10"
   }
 }

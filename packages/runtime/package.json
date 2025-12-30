@@ -3,6 +3,11 @@
   "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./compiler": "./src/compiler/codegen.ts"
+  },
   "scripts": {
     "dev": "bun --bun ./src/demo.ts --hot --watch"
   },
