@@ -1,122 +1,164 @@
-type BankEntry = {
-  id: string
-  value: any
-  deps?: string[]
-  isDerived: boolean
-}
-
 export function generateAppJs(component: any) {
-  const { name, bank, handlers, html, instructions } = component
+  const { name, bank, handlerBank, instructions } = component
+  const safeId = (id: string) => id.replace(/[^a-zA-Z0-9]/g, '_')
 
-  // IDをJS変数名として安全にする
-  const safeId = (id: string) => id.replace(/[-]/g, '_')
-
-  // 1. 各ノードの依存関係（逆引き）を計算：誰が変わったら誰が影響を受けるか
-  const dependentsMap: Record<string, string[]> = {}
-  Object.values(bank).forEach((entry: any) => {
-    if (entry.deps) {
-      entry.deps.forEach((depId: string) => {
-        if (!dependentsMap[depId]) dependentsMap[depId] = []
-        dependentsMap[depId].push(entry.id)
-      })
+  // --- 1. 名前生成器 (a, b, c...z, aa, ab...) ---
+  const getShortName = (index: number): string => {
+    let res = ''
+    let n = index
+    while (n >= 0) {
+      res = String.fromCharCode(97 + (n % 26)) + res
+      n = Math.floor(n / 26) - 1
     }
+    return `_${res}` // 競合防止のためアンダースコアを付与
+  }
+
+  // --- 2. マッピングの作成 ---
+  const entries = Object.values(bank) as any[]
+  const idToShort = new Map<string, string>()
+
+  // 状態/Derived/テンプレートに短い名前を割り振る
+  entries.forEach((e, i) => {
+    idToShort.set(e.id, getShortName(i))
   })
 
-  // 2. State変数 (v_...)
-  const stateDecls = Object.values(bank)
-    .filter((e: any) => !e.isDerived)
-    .map((e: any) => `  let v_${safeId(e.id)} = ${JSON.stringify(e.value)};`)
+  // セレクタ（DOM参照）に短い名前を割り振る
+  const allSelectors = Array.from(
+    new Set(instructions.map((i: any) => i.selector))
+  )
+  const selToShort = new Map<string, string>()
+  allSelectors.forEach((sel, i) => {
+    selToShort.set(sel as string, `_e${getShortName(i)}`)
+  })
+
+  const getInfo = (id: string) => {
+    const entry = entries.find(e => e.id === id)
+    const short = idToShort.get(id) || safeId(id)
+    const isDerived = entry?.isDerived ?? false
+    return {
+      name: short,
+      isDerived,
+      ref: isDerived ? `${short}()` : short, // _a() か _a か
+    }
+  }
+
+  // --- 3. 置換ロジック (s.count() -> _a 等) ---
+  const replaceScope = (code: string) => {
+    let result = code
+    // Getter: s.name() -> _a() or _a
+    Object.keys(bank).forEach(key => {
+      const info = getInfo(bank[key].id)
+      const getterRegex = new RegExp(
+        `s(?:\\.${key}|\\[["']${key}["']\\])\\(\\s*\\)`,
+        'g'
+      )
+      result = result.replace(getterRegex, info.ref)
+    })
+    // Setter: s.name(val) -> (_a = val, _u_a())
+    Object.keys(bank).forEach(key => {
+      const info = getInfo(bank[key].id)
+      if (!info.isDerived) {
+        const setterRegex = new RegExp(
+          `s(?:\\.${key}|\\[["']${key}["']\\])\\((.+)\\)`,
+          'g'
+        )
+        result = result.replace(
+          setterRegex,
+          `(${info.name} = $1, _u${info.name}())`
+        )
+      }
+    })
+    return result
+  }
+
+  // --- 4. 依存マップ ---
+  const dependentsMap: Record<string, string[]> = {}
+  entries.forEach(e => {
+    e.deps?.forEach((dId: string) => {
+      ;(dependentsMap[dId] || (dependentsMap[dId] = [])).push(e.id)
+    })
+  })
+
+  // --- 5. コードパーツの生成 ---
+
+  // State宣言
+  const stateDecls = entries
+    .filter(e => !e.isDerived)
+    .map(e => `  let ${idToShort.get(e.id)} = ${JSON.stringify(e.value)};`)
     .join('\n')
 
-  // 3. Derived関数 (f_...)
-  const derivedDecls = Object.values(bank)
-    .filter((e: any) => e.isDerived)
-    .map((e: any) => {
-      const sId = safeId(e.id)
-      // 関数に渡す「scope」オブジェクト。s.count() などの呼び出しを解決
-      const scopeObj = Object.keys(bank)
-        .map(key => {
-          const target = bank[key]
-          const valCall =
-            target.id === e.id
-              ? `() => { throw 'Recursive' }`
-              : `() => ${target.isDerived ? `f_${safeId(target.id)}()` : `v_${safeId(target.id)}`}`
-          return `"${key}": ${valCall}`
-        })
-        .join(', ')
-
-      return `  const f_${sId} = () => (${e.value.toString()})({ ${scopeObj} });`
+  // Derived/Template宣言
+  const derivedDecls = entries
+    .filter(e => e.isDerived)
+    .map(e => {
+      const short = idToShort.get(e.id)!
+      let body = ''
+      if (e.templateBody) {
+        body = `\`${e.templateBody.replace(/\$\{s\["([\w-]+)"\]\(\)\}/g, (_, key) => `\${${getInfo(bank[key].id).ref}}`)}\``
+      } else {
+        const rawFn = e.value
+          .toString()
+          .replace(/^\s*\(?\s*[a-zA-Z_$][\w$]*\s*\)?\s*=>\s*/, '')
+        body = replaceScope(rawFn)
+      }
+      return `  const ${short} = () => ${body};`
     })
     .join('\n')
 
-  // 4. 更新関数 (up_...)：DOM操作と依存Derivedの起爆をセットにする
-  const updateFns = Object.values(bank)
-    .map((e: any) => {
-      const sId = safeId(e.id)
+  // DOMキャッシュ
+  const domCache = allSelectors
+    .map(
+      sel =>
+        `  const ${selToShort.get(sel as string)} = root.querySelector('${sel}');`
+    )
+    .join('\n')
 
-      // このノードに紐づくDOM操作（setTextなど）
+  // 更新関数 (up)
+  const updateFns = entries
+    .map(e => {
+      const short = idToShort.get(e.id)!
       const domOps = instructions
         .filter(
           (inst: any) => inst.signalId === e.id && inst.action === 'setText'
         )
         .map(
-          (inst: any) =>
-            `    { const el = root.querySelector('${inst.selector}'); if(el) el.textContent = ${e.isDerived ? `f_${sId}()` : `v_${sId}`}; }`
+          (i: any) =>
+            `    if(${selToShort.get(i.selector)}) ${selToShort.get(i.selector)}.textContent = ${getInfo(e.id).ref};`
         )
         .join('\n')
-
-      // このノードに依存している他のノード（Derived）の更新関数を叩く
       const cascade = (dependentsMap[e.id] || [])
-        .map(depId => `    up_${safeId(depId)}();`)
+        .map(dId => `    _u${idToShort.get(dId)}();`)
         .join('\n')
-
-      return `  function up_${sId}() {\n${domOps}\n${cascade}\n  }`
+      return domOps || cascade
+        ? `  function _u${short}() {\n${domOps}\n${cascade}\n  }`
+        : ''
     })
+    .filter(Boolean)
     .join('\n')
 
-  // 5. イベントリスナーとハンドラ
+  // イベント登録
   const eventListeners = instructions
     .filter((inst: any) => inst.action === 'addListener')
     .map((inst: any) => {
-      // signalsプロキシの構築：値を代入してup関数を起爆
-      const signalsSetter = Object.keys(bank)
-        .map(key => {
-          const e = bank[key]
-          const sId = safeId(e.id)
-          return `"${key}": (val) => { if(val !== undefined){ v_${sId} = val; up_${sId}(); } return ${e.isDerived ? `f_${sId}()` : `v_${sId}`}; }`
-        })
-        .join(', ')
-
-      return `
-    root.querySelector('${inst.selector}').addEventListener('${inst.attrName}', (e) => {
-      const s = { ${signalsSetter} };
-      (${component.handlerBank[inst.signalId].toString()})(s);
-    });`
+      const handlerFn = handlerBank[inst.signalId]
+      if (!handlerFn) return ''
+      const rawFn = handlerFn
+        .toString()
+        .replace(/^\s*\(?\s*[a-zA-Z_$][\w$]*\s*\)?\s*=>\s*/, '')
+      const body = replaceScope(rawFn)
+      return `  if(${selToShort.get(inst.selector)}) ${selToShort.get(inst.selector)}.addEventListener('${inst.attrName}', () => { ${body} });`
     })
     .join('\n')
 
-  // 最終出力
   return `
-// --- Quix Zero Runtime Output [${name}] ---
+// --- Quix Minified Zero Runtime [${name}] ---
 (function() {
   const root = document.getElementById("app");
   if (!root) return;
-
-  // 1. States
+${domCache}
 ${stateDecls}
-
-  // 2. Deriveds
 ${derivedDecls}
-
-  // 3. Update Functions (Reactive Chain)
 ${updateFns}
-
-  // 4. Mount & Event Listeners
-  const mount = () => {
 ${eventListeners}
-  };
-
-  mount();
-})();
-  `.trim()
+})();`.trim()
 }

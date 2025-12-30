@@ -15,7 +15,8 @@ export type Instruction = {
 export type HiddenDerivedEntry = {
   id: string
   deps: string[]
-  fn: (scope: any) => any
+  fn?: (scope: any) => any
+  templateBody?: string
 }
 
 export type VNode = {
@@ -160,7 +161,6 @@ function parseChildren(children: any[], qid: string) {
       let finalSignalId: string
       let finalInitialValue: any
 
-      // テンプレートセグメントが単一の関数のみの場合（最適化）
       if (buffer.length === 1 && typeof buffer[0] === 'function') {
         const { instructionId, initial } = processDynamicPart(
           buffer[0],
@@ -169,48 +169,40 @@ function parseChildren(children: any[], qid: string) {
         )
         finalSignalId = instructionId
         finalInitialValue = initial
-      }
-      // 混合テンプレートリテラルの生成
-      else {
+      } else {
         const templateHdId = `hd-tmpl-${nanoid(6)}`
-        let templateLiteralBody = ''
-        let combinedInitial = ''
         const allDeps = new Set<string>()
+        let combinedInitial = ''
 
-        buffer.forEach(item => {
+        // 💡 ここで `... ${s["count"]()} ...` という形式の文字列を組み立てる
+        const bodyParts = buffer.map(item => {
           if (typeof item === 'function') {
             const { instructionId, accessKey, initial } = processDynamicPart(
               item,
               'hd-txt',
               hiddenDerived
             )
-            templateLiteralBody += `\${s["${accessKey}"]()}`
-            combinedInitial += initial
             allDeps.add(instructionId)
+            combinedInitial += initial
+            return `\${s["${accessKey}"]()}` // スコープオブジェクト `s` を介して呼ぶ形式
           } else {
             const str = String(item)
-            // テンプレートリテラル内の特殊文字をエスケープ
-            templateLiteralBody += str.replace(/[`\\$]/g, '\\$&')
             combinedInitial += str
+            return str.replace(/[`\\$]/g, '\\$&') // テンプレートリテラルで壊れないようエスケープ
           }
         })
 
-        // (s) => `...` 形式の関数をコンパイル
-        const compiledFn = new Function(
-          's',
-          `return \`${templateLiteralBody}\``
-        ) as (s: any) => any
+        const templateBody = bodyParts.join('')
+
+        // 💡 以前はここで new Function していたが、文字列として記録するだけに
         hiddenDerived.push({
           id: templateHdId,
           deps: Array.from(allDeps),
-          fn: compiledFn,
+          templateBody: templateBody, // 💡 これを codegen に渡す
         })
 
         finalSignalId = templateHdId
         finalInitialValue = combinedInitial
-        logger.info(
-          `Template     | Generated segment ${templateHdId}: \`${templateLiteralBody}\``
-        )
       }
 
       instructions.push({

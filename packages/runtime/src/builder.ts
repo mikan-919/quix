@@ -114,12 +114,14 @@ export class ComponentBuilder<
 
     // 3. Hidden Derived を bank に統合
     for (const hd of vnode.hiddenDerived) {
-      // 本質的に derived と同じ形式で格納
       this.bank[hd.id] = {
         id: hd.id,
-        deps: hd.deps, // h関数が track した ID がそのまま入る
-        value: hd.fn,
+        deps: hd.deps,
+        value: hd.fn, // テンプレートの場合は undefined
         isDerived: true,
+        // 💡 ここを追加！ h.ts から届いた文字列を bank に入れる
+        // @ts-expect-error
+        templateBody: hd.templateBody,
       }
     }
 

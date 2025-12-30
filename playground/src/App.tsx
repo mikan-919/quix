@@ -11,3 +11,8 @@ export default component('App')
       <p>Double: {state.double()}</p>
     </div>
   ))
+// export default component('App').render(({}) => (
+//   <div>
+//     <h1>Hello world!</h1>
+//   </div>
+// ))
