@@ -20,6 +20,7 @@
   "dependencies": {
     "@biomejs/biome": "^2.3.10",
     "consola": "^3.4.2",
-    "nanoid": "^5.1.6"
+    "nanoid": "^5.1.6",
+    "nanoid-dictionary": "^5.0.0"
   }
 }

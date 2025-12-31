@@ -1,0 +1,17 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`Snapshot: Counter App Codegen 1`] = `
+"// --- Quix Minified Zero Runtime [App] ---
+(function() {
+  const root = document.getElementById("app");
+  if (!root) return;
+  const _e_a = root.querySelector('.q-1');
+  let _a = 0;
+  const _b = () => _a * 2;
+  function _u_a() {
+    if(_e_a) _e_a.textContent = _a;
+    _u_b();
+  }
+  if(_e_a) _e_a.addEventListener('click', () => { (_a = _a + 1, _u_a()) });
+})();"
+`;
