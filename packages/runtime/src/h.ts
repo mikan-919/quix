@@ -1,7 +1,7 @@
 import { generateId } from './core/id'
 import { tracker } from './core/tracker'
 import type { HiddenDerivedRequest, Instruction, VNode } from './core/types'
-import { Show } from './index'
+import { For, Show } from './index'
 
 export function h(tag: any, props: any, ...children: any[]): VNode {
   // 1. <Show /> コンポーネントの特別処理
@@ -64,6 +64,62 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
       html: `<span class="${qid}" style="display:contents" data-show-anchor></span>`,
       instructions,
       hiddenDerivedRequests,
+    }
+  }
+
+  if (tag === For) {
+    const qid = generateId('q')
+    const instructions: Instruction[] = []
+
+    // 1. 依存収集 (props.each を実行して、どのStateに依存しているか特定)
+    const listScopeId = generateId('list')
+    const deps: string[] = []
+
+    if (props && typeof props.each === 'function') {
+      tracker.runWithScope(
+        listScopeId,
+        id => deps.push(id),
+        () => props.each() // 実行して依存を記録
+      )
+    }
+
+    // 2. テンプレート生成
+    let template = ''
+    const itemRenderer = children[0] // {(item) => ...}
+
+    if (typeof itemRenderer === 'function') {
+      // モックシグナル: 実行されるとユニークなプレースホルダーを返す
+      const MOCK_KEY = '<!--Q_ITEM-->'
+      const mockItemSignal = () => MOCK_KEY
+
+      // レンダラーを実行してVNodeを取得
+      const vnode = itemRenderer(mockItemSignal)
+
+      // HTML文字列内のモックキーを、JSテンプレート変数の ${v} に置換
+      const rawHtml =
+        vnode && typeof vnode === 'object' && 'html' in vnode
+          ? vnode.html
+          : String(vnode)
+
+      template = rawHtml.replace(MOCK_KEY, '${v}')
+    }
+
+    // 3. 命令生成
+    // 依存Stateが見つかれば、そのIDに対してlist命令を発行
+    if (deps.length > 0) {
+      instructions.push({
+        signalId: deps[0]!, // 主たる依存先（items配列そのもの）
+        selector: `.${qid}`,
+        action: 'list',
+        template,
+      })
+    }
+
+    return {
+      tag: 'For',
+      html: `<span class="${qid}" style="display:contents" data-for-anchor></span>`,
+      instructions,
+      hiddenDerivedRequests: [],
     }
   }
 

@@ -111,6 +111,10 @@ export function generateAppJs(context: ComponentContext) {
           if (i.action === 'show' && i.template) {
             return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)} ? \`${i.template}\` : '';`
           }
+          if (i.action === 'list' && i.template) {
+            // _a.map(v => `<div>${v}</div>`).join('')
+            return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)}.map(v => \`${i.template}\`).join('');`
+          }
           return ''
         })
         .filter(Boolean)

@@ -37,11 +37,9 @@ export type ComponentNode = StateNode | DerivedNode | HandlerNode
 export interface Instruction {
   signalId: string
   selector: string
-  // ⭐️ 修正: 'show' アクションを追加
-  action: 'setText' | 'setAttr' | 'addListener' | 'show'
+  action: 'setText' | 'setAttr' | 'addListener' | 'show' | 'list'
   attrName?: string
-  // Show用の追加プロパティ
-  template?: string // 表示時に挿入するHTML文字列
+  template?: string
 }
 
 export interface HiddenDerivedRequest {
