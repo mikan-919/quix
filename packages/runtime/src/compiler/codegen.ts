@@ -182,9 +182,6 @@ export function generateAppJs(context: ComponentContext) {
   const root = document.getElementById("app");
   if (!root) return;
 
-  // HTML構造を注入
-  root.innerHTML = ${JSON.stringify(context.html)};
-
 ${domCache}
 ${stateDecls}
 ${derivedDecls}

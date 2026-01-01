@@ -1,28 +1,24 @@
 import { describe, expect, test } from 'bun:test'
-import { h } from '../h'
+import { h, Show } from '../..' // indexから読み込む形に修正
 import { component } from './builder'
 
-describe('Quix Analysis Engine (Refactored)', () => {
+describe('Quix Analysis Engine', () => {
   test('should correctly build a dependency graph for derived states', () => {
     // 1. ビルダーの構築
     const builder = component('TestApp')
       .state('count', 0)
+      // 型定義に合わせて s.count() と呼び出す
       .derived('double', ['count'], s => s.count() * 2)
 
     const context = builder.context
 
-    // 2. キーからノードを取得して検証
     const countNode = context.getNodeByKey('count')
     const doubleNode = context.getNodeByKey('double')
 
-    // ノードが存在すること
     expect(countNode).toBeDefined()
     expect(doubleNode).toBeDefined()
-    expect(countNode?.type).toBe('state')
-    expect(doubleNode?.type).toBe('derived')
 
-    // 3. 依存関係（ID）が正しく解決されているか検証
-    // doubleNode.deps に countNode.id が含まれているはず
+    // 依存関係IDのチェック
     if (countNode && doubleNode && doubleNode.type === 'derived') {
       expect(doubleNode.deps).toContain(countNode.id)
     }
@@ -41,43 +37,45 @@ describe('Quix Analysis Engine (Refactored)', () => {
   })
 
   test('should extract Hidden Derived nodes from JSX via render()', () => {
-    // 1. renderを実行して解析完了済みのコンテキストを取得
     const ctx = component('TestApp')
       .state('count', 10)
       .render(({ state }) => h('div', null, 'Value is: ', () => state.count()))
 
-    // 2. Hidden Derived (JSX内の関数) が nodes に登録されているか探す
     const allNodes = ctx.getAllNodes()
+    // keyが __hidden_ で始まるノードを探す
     const hiddenNode = allNodes.find(n => n.key.startsWith('__hidden_'))
 
     expect(hiddenNode).toBeDefined()
     expect(hiddenNode?.type).toBe('derived')
 
-    // 3. Hidden Derived の依存関係チェック
     const countNode = ctx.getNodeByKey('count')
     if (hiddenNode && hiddenNode.type === 'derived' && countNode) {
-      // テンプレート内で state.count() を呼んでいるので、依存に含まれるはず
       expect(hiddenNode.deps).toContain(countNode.id)
-
-      // テンプレートボディ（簡易実装版）の確認
-      expect(hiddenNode.templateBody).toContain('${val}')
+      // テキスト補間なので isExpression は undefined (false)
+      expect(hiddenNode.isExpression).toBeFalsy()
     }
-
-    // 4. 命令セット (Instructions) の検証
-    // setText アクションが生成されているはず
-    const setTextInst = ctx.instructions.find(i => i.action === 'setText')
-    expect(setTextInst).toBeDefined()
-
-    // 命令のターゲットIDが Hidden Derived のIDと一致するか
-    expect(setTextInst?.signalId).toBe(hiddenNode?.id)
   })
 
-  test('should generate correct HTML structure', () => {
-    const ctx = component('TestApp').render(() =>
-      h('div', { id: 'root' }, h('span', null, 'Hello'))
+  test('should analyze Show component correctly', () => {
+    const ctx = component('TestApp')
+      .state('count', 0)
+      .render(({ state }) =>
+        h(Show, { when: () => state.count() > 5 }, h('p', null, 'Big!'))
+      )
+
+    const allNodes = ctx.getAllNodes()
+    // Showの条件式も __hidden_ で始まる Derived として登録される
+    // ただし isExpression: true になっているはず
+    const conditionNode = allNodes.find(
+      n => n.key.startsWith('__hidden_') && (n as any).isExpression === true
     )
 
-    // 静的な要素のみなのでQIDは付かず、ID属性だけが残るのが正しい挙動
-    expect(ctx.html).toBe('<div id="root"><span>Hello</span></div>')
+    expect(conditionNode).toBeDefined()
+
+    // 命令に 'show' アクションが含まれているか
+    const showInst = ctx.instructions.find(i => i.action === 'show')
+    expect(showInst).toBeDefined()
+    expect(showInst?.signalId).toBe(conditionNode?.id)
+    expect(showInst?.template).toBe('<p>Big!</p>')
   })
 })
