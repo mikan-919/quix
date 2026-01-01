@@ -1,4 +1,4 @@
-import { component } from '@quix/runtime'
+import { component, Show } from '@quix/runtime'
 
 export default component('App')
   .state('count', 0)
@@ -10,7 +10,13 @@ export default component('App')
       <h1>new frontend library</h1>
       <button onclick={handlers.inc}>Count: {state.count()}</button>
       <p>Double: {state.double()}</p>
-      <p>isQuad: {state.isQuad() ? 'YAY' : 'OHH'}</p>
+      <Show when={() => state.count() % 2 === 0}>
+        <p style='color: red'>Even Number!</p>
+      </Show>
+      <Show when={() => state.count() % 2 !== 0}>
+        <p style='color: blue'>Odd Number!</p>
+      </Show>
+      普通のテキストはどうなのか問題
     </div>
   ))
 // export default component('App').render(({}) => (

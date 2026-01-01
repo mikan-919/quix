@@ -1,19 +1,75 @@
 import { nanoid } from 'nanoid'
 import { tracker } from './core/tracker'
-import type { HiddenDerivedRequest, Instruction } from './core/types'
-
-// ... (VNode, generateQid は変更なし) ...
-export interface VNode {
-  tag: string
-  html: string
-  instructions: Instruction[]
-  hiddenDerivedRequests: HiddenDerivedRequest[]
-}
+import type { HiddenDerivedRequest, Instruction, VNode } from './core/types'
+import { Show } from './index'
 
 const generateQid = () => `q-${nanoid(6)}`
 
-export function h(tag: string, props: any, ...children: any[]): VNode {
-  // ... (前半の属性処理は変更なし) ...
+export function h(tag: any, props: any, ...children: any[]): VNode {
+  // 1. <Show /> コンポーネントの特別処理
+  if (tag === Show) {
+    const qid = generateQid()
+    const instructions: Instruction[] = []
+    const hiddenDerivedRequests: HiddenDerivedRequest[] = []
+
+    const conditionId = `cond-${nanoid(6)}`
+    const deps = new Set<string>()
+    let templateBody = ''
+
+    if (props && typeof props.when === 'function') {
+      tracker.runWithScope(
+        conditionId,
+        id => deps.add(id),
+        () => {
+          props.when() // 実行して依存収集
+
+          // 式の抽出 (例: "() => s.count() > 5" -> "s.count() > 5")
+          const fnStr = props.when.toString()
+          const match = fnStr.match(/=>\s*([\s\S]*)/)
+          templateBody = match ? match[1].trim() : 'false'
+        }
+      )
+    }
+
+    hiddenDerivedRequests.push({
+      placeholderId: conditionId,
+      deps: Array.from(deps),
+      templateBody,
+      isExpression: true, // ⭐️ Showの条件は式として扱う
+    })
+
+    const flatChildren = children.flat()
+    const childHtmlParts: string[] = []
+
+    flatChildren.forEach(child => {
+      if (child && typeof child === 'object' && 'html' in child) {
+        const vnode = child as VNode
+        instructions.push(...vnode.instructions)
+        hiddenDerivedRequests.push(...vnode.hiddenDerivedRequests)
+        childHtmlParts.push(vnode.html)
+      } else {
+        childHtmlParts.push(String(child))
+      }
+    })
+
+    const templateHtml = childHtmlParts.join('')
+
+    instructions.push({
+      signalId: conditionId,
+      selector: `.${qid}`,
+      action: 'show',
+      template: templateHtml,
+    })
+
+    return {
+      tag: 'Show',
+      html: `<span class="${qid}" style="display:contents" data-show-anchor></span>`,
+      instructions,
+      hiddenDerivedRequests,
+    }
+  }
+
+  // 2. 通常のHTMLタグ処理
   const qid = generateQid()
   const instructions: Instruction[] = []
   const hiddenDerivedRequests: HiddenDerivedRequest[] = []
@@ -38,7 +94,6 @@ export function h(tag: string, props: any, ...children: any[]): VNode {
     }
   }
 
-  // 2. 子要素の処理
   const flatChildren = children.flat()
   const processedHtml: string[] = []
 
@@ -48,41 +103,22 @@ export function h(tag: string, props: any, ...children: any[]): VNode {
   if (isTextContent && hasFunction) {
     needsQid = true
     const tmplId = `hd-${nanoid(6)}`
-
     const deps = new Set<string>()
     const initialHtmlParts: string[] = []
 
-    // テンプレートボディの構築
     const templateParts = flatChildren.map(child => {
       if (typeof child === 'function') {
-        // 関数を実行して依存IDを収集
         return tracker.runWithScope(
           tmplId,
           id => deps.add(id),
           () => {
-            const val = child() // 初期値を取得
+            const val = child()
             initialHtmlParts.push(String(val))
-
-            // ⭐️ 修正: 関数のソースコードから式を抽出する
-            // child.toString() -> "() => state.isQuad() ? 'A' : 'B'"
-            const fnStr = child.toString()
-
-            // アロー関数の "=>" より後ろの部分を取り出す
-            // 正規表現で簡易的に抽出 (ブロック {} がない単一式を想定)
-            const match = fnStr.match(/=>\s*([\s\S]*)/)
-            if (match) {
-              const expr = match[1].trim()
-              // JSテンプレートリテラル内に式を埋め込む
-              return `\${${expr}}`
-            }
-
-            // フォールバック（解析できなかった場合）
+            // ⭐️ 修正: テキスト補間では式抽出を行わず、常にプレースホルダーを使う
             return `\${val}`
           }
         )
       }
-
-      // 通常の文字列
       const str = String(child)
       initialHtmlParts.push(str)
       return str.replace(/[`\\$]/g, '\\$&')
@@ -92,6 +128,7 @@ export function h(tag: string, props: any, ...children: any[]): VNode {
       placeholderId: tmplId,
       deps: Array.from(deps),
       templateBody: templateParts.join(''),
+      // isExpression: false (デフォルト)
     })
 
     instructions.push({
@@ -99,10 +136,8 @@ export function h(tag: string, props: any, ...children: any[]): VNode {
       selector: `.${qid}`,
       action: 'setText',
     })
-
     processedHtml.push(initialHtmlParts.join(''))
   } else {
-    // ... (再帰処理は変更なし) ...
     flatChildren.forEach(child => {
       if (child && typeof child === 'object' && 'html' in child) {
         const vnode = child as VNode
@@ -115,7 +150,6 @@ export function h(tag: string, props: any, ...children: any[]): VNode {
     })
   }
 
-  // クラス名の注入
   if (needsQid) {
     staticProps.class = `${staticProps.class || ''} ${qid}`.trim()
   }

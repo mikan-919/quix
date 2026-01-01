@@ -5,7 +5,7 @@ export function generateAppJs(context: ComponentContext) {
   const nodes = context.getAllNodes()
   const instructions = context.instructions
 
-  // 1. 変数名マップ作成
+  // ... (変数名マップ作成、参照解決ヘルパー、DOM要素キャッシュ、State宣言、Derived宣言 は変更なし) ...
   const idToShort = new Map<string, string>()
   const getShortName = (i: number) =>
     `_${String.fromCharCode(97 + (i % 26))}${i > 25 ? Math.floor(i / 26) : ''}`
@@ -14,7 +14,6 @@ export function generateAppJs(context: ComponentContext) {
     idToShort.set(node.id, getShortName(i))
   })
 
-  // 参照解決ヘルパー
   const getRef = (id: string) => {
     const node = context.getNodeById(id)
     if (!node) return 'undefined'
@@ -22,7 +21,6 @@ export function generateAppJs(context: ComponentContext) {
     return node.type === 'derived' ? `${name}()` : name
   }
 
-  // ... (DOMキャッシュ、State宣言は変更なし) ...
   const selectors = Array.from(new Set(instructions.map(i => i.selector)))
   const domCache = selectors
     .map((sel, i) => `  const _e${i} = root.querySelector('${sel}');`)
@@ -35,53 +33,73 @@ export function generateAppJs(context: ComponentContext) {
     )
     .join('\n')
 
-  // 4. Derived宣言
   const derivedDecls = nodes
     .filter(n => n.type === 'derived')
     .map(n => {
       const node = n as DerivedNode
       const name = idToShort.get(n.id)
-
-      // ⭐️ 修正: User Derived も Hidden Derived も共通の置換ロジックを通す
       let fnStr = ''
-
       if (node.templateBody) {
-        // Hidden Derived: テンプレート文字列をアロー関数で包む
-        fnStr = `() => \`${node.templateBody}\``
+        if (node.isExpression) {
+          fnStr = `() => ${node.templateBody}`
+        } else {
+          const firstDep = node.deps[0]
+          const depRef = firstDep ? `\${${getRef(firstDep)}}` : ''
+          const body = `\`${node.templateBody.replace('${val}', depRef)}\``
+          return `  const ${name} = () => ${body};`
+        }
       } else {
-        // User Derived: 元の関数文字列を使う
         fnStr = node.fn.toString()
       }
-
-      // 変数参照の置換 (Dependency Replacement)
       nodes.forEach(targetNode => {
         if (targetNode.type === 'handler') return
-
         const targetRef = getRef(targetNode.id)
         const key = targetNode.key
-
-        // ユーザーコードの変数名は何かわからない (state, s, etc)
-        // そのため "任意の変数.key()" というパターンを置換する
-        // [a-zA-Z0-9_]+  --> 変数名にマッチ
-
-        // Getter置換: anyVar.key() -> targetRef
         const regexCall = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(\\)`, 'g')
         fnStr = fnStr.replace(regexCall, targetRef!)
-
-        // Getter置換 (プロパティアクセス): anyVar.key -> targetRef
         const regexGet = new RegExp(`[a-zA-Z0-9_]+\\.${key}`, 'g')
         fnStr = fnStr.replace(regexGet, targetRef!)
       })
-
       return `  const ${name} = ${fnStr};`
     })
     .join('\n')
 
-  // ... (Updates, Events生成ロジックも同様に正規表現を修正) ...
+  // ⭐️ 追加: デッドコード削除のための判定ロジック
+  // メモ化用のキャッシュ
+  const needsUpdateCache = new Map<string, boolean>()
+
+  const needsUpdate = (nodeId: string): boolean => {
+    if (needsUpdateCache.has(nodeId)) return needsUpdateCache.get(nodeId)!
+
+    // 1. このノード自体に対するDOM操作命令があるか？
+    const hasDomOps = instructions.some(i => i.signalId === nodeId)
+    if (hasDomOps) {
+      needsUpdateCache.set(nodeId, true)
+      return true
+    }
+
+    // 2. このノードに依存している他のノードが、更新を必要としているか？（再帰チェック）
+    const dependents = nodes.filter(
+      n => n.type === 'derived' && (n as DerivedNode).deps.includes(nodeId)
+    )
+
+    // 循環参照防止のために仮でfalseを入れておく
+    needsUpdateCache.set(nodeId, false)
+
+    const hasActiveDependents = dependents.some(dep => needsUpdate(dep.id))
+
+    needsUpdateCache.set(nodeId, hasActiveDependents)
+    return hasActiveDependents
+  }
+
+  // 5. 更新関数 (Updates) の生成
   const initialCallList: string[] = []
 
   const updates = nodes
     .map(node => {
+      // ⭐️ 修正: 更新が必要ないノード（未使用のDerivedなど）の関数は生成しない
+      if (!needsUpdate(node.id)) return ''
+
       const sName = idToShort.get(node.id)
       const domOps = instructions
         .filter(i => i.signalId === node.id)
@@ -89,6 +107,9 @@ export function generateAppJs(context: ComponentContext) {
           const elIdx = selectors.indexOf(i.selector)
           if (i.action === 'setText') {
             return `    if(_e${elIdx}) _e${elIdx}.textContent = ${getRef(node.id)};`
+          }
+          if (i.action === 'show' && i.template) {
+            return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)} ? \`${i.template}\` : '';`
           }
           return ''
         })
@@ -99,6 +120,8 @@ export function generateAppJs(context: ComponentContext) {
         .filter(
           n => n.type === 'derived' && (n as DerivedNode).deps.includes(node.id)
         )
+        // ⭐️ 修正: 依存先が更新関数を持っている場合のみ呼び出す
+        .filter(n => needsUpdate(n.id))
         .map(n => `    _u${idToShort.get(n.id)}();`)
         .join('\n')
 
@@ -108,12 +131,21 @@ export function generateAppJs(context: ComponentContext) {
         initialCallList.push(`_u${sName}()`)
       }
 
+      if (node.type === 'derived') {
+        const isShowCondition = instructions.some(
+          inst => inst.signalId === node.id && inst.action === 'show'
+        )
+        if (isShowCondition) {
+          initialCallList.push(`_u${sName}()`)
+        }
+      }
+
       return `  function _u${sName}() {\n${domOps}\n${cascades}\n  }`
     })
     .filter(Boolean)
     .join('\n')
 
-  // 6. イベントリスナー (ここも正規表現を修正)
+  // ... (Events, return は変更なし) ...
   const events = instructions
     .filter(i => i.action === 'addListener')
     .map(i => {
@@ -123,24 +155,22 @@ export function generateAppJs(context: ComponentContext) {
 
       let body = handlerNode.fn.toString()
 
-      // 1. Getter置換
       nodes.forEach(target => {
         const tName = idToShort.get(target.id)
         const key = target.key
-        // 任意の変数名.key() -> 参照
         const regexGet = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(\\)`, 'g')
         const replacement = target.type === 'derived' ? `${tName}()` : tName
         body = body.replace(regexGet, replacement!)
       })
 
-      // 2. Setter置換
       nodes.forEach(target => {
         if (target.type !== 'state') return
         const tName = idToShort.get(target.id)
         const tUpdate = `_u${tName}`
         const key = target.key
-        // 任意の変数名.key(...) -> 更新ロジック
         const regexSet = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(([^)]+)\\)`, 'g')
+        // ⭐️ 注意: tUpdate が生成されていない場合（Stateがどこにも使われていない）は呼び出さないべきだが
+        // State更新は常に副作用(DOM更新)の起点となるため、needsUpdate(state) は基本trueになるはず
         body = body.replace(regexSet, `(${tName} = $1, ${tUpdate}())`)
       })
 

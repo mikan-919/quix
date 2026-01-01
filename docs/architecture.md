@@ -16,17 +16,18 @@ Quix の最大の特徴は **"Build-time Execution" (ビルド時実行)** で�
 ユーザーが記述した `component(...)` コードが実行されます。
 - **State Proxy:** `state.count()` などのアクセスを検知し、依存関係を自動的に記録します。
 - **Hidden Derived:** JSX 内に書かれたインライン関数（例: `() => state.count() * 2`）は自動的に抽出され、計算済みの派生ステートとして登録されます。
-- **Initial Rendering:** `h` 関数が実行され、初期 HTML 構造と DOM 更新命令（Instructions）が生成されます。
+- **Special Components:** `<Show />` などの制御フローコンポーネントは、`h` 関数内でインターセプトされ、専用の命令（Instructions）に変換されます。
 
 ### 2. Context Construction
 すべての情報は `ComponentContext` オブジェクトに集約されます。
-- **Nodes:** State, Derived, Handler の定義。
+- **Nodes:** State, Derived, Handler の定義。`isExpression` フラグにより、式として評価すべきか文字列として扱うかを区別します。
 - **HTML:** 静的な HTML テンプレート（初期値込み）。
-- **Instructions:** 「どのステートが変わったら、どの DOM を更新するか」の命令リスト。
+- **Instructions:** 「どのステートが変わったら、どの DOM を更新するか」の命令リスト（`setText`, `show` など）。
 
 ### 3. Code Generation (Codegen)
 `ComponentContext` を入力として、JavaScript 文字列を生成します。
 - **Optimization:** 変数名は `_a`, `_b` のように短縮されます。
+- **Dead Code Elimination:** 依存グラフを解析し、DOM 更新に寄与しない不要な更新関数は生成されません。
 - **Cascade Update:** 依存グラフに基づき、更新関数 (`_u_a()`) が連鎖的に呼び出されるロジックが組み立てられます。
 - **No Virtual DOM:** 生成されるコードは `innerHTML`, `querySelector`, `textContent = ...` などのネイティブ API のみで構成されます。
 

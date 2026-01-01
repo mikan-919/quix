@@ -1,21 +1,23 @@
 # Roadmap & Improvements
 
-## Current Status (v0.1.0)
+## Current Status (v0.1.5)
 - ✅ **Core Reactivity:** State, Derived, Handler の依存関係解決の実装完了。
-- ✅ **Zero-Bundle-Size:** ランタイムライブラリを含まない、600バイト程度の Vanilla JS を生成可能。
-- ✅ **FOUC Prevention:** サーバーサイドでの初期 HTML 生成と注入による、ちらつきのない表示。
-- ✅ **Dev Experience:** Vite を利用した高速な HMR（Hot Module Replacement）環境。
+- ✅ **Zero-Bundle-Size:** ランタイムライブラリを含まない、極小の Vanilla JS を生成。
+- ✅ **FOUC Prevention:** サーバーサイドでの初期 HTML 生成と注入。
+- ✅ **Dev Experience:** Vite を利用した高速な HMR と開発サーバー統合。
+- ✅ **Conditional Rendering:** `<Show />` コンポーネントによる表示切り替え。
+- ✅ **Type Safety:** 依存配列に基づく厳密な型推論。
+- ✅ **Code Optimization:** 不要な更新関数の削除（Dead Code Elimination）。
 
 ## Immediate Goals (v0.2.0)
 
-### 1. 制御構文のサポート (Control Flow)
-現在は静的な DOM 構造しか扱えません。実用的なアプリのために以下が必要です。
-- **条件分岐 (`If` / `Show`):** ステートに応じて DOM を出し分けたい。
-- **リストレンダリング (`For` / `Map`):** 配列データを元に要素を繰り返したい。
-*課題:* DOM の挿入・削除位置を特定するための「アンカー（コメントノード等）」の概念導入が必要。
+### 1. リストレンダリング (List Rendering)
+配列データを元に要素を繰り返す機能の実装。
+- **`<For />` コンポーネント:** `items` プロパティを受け取り、配列の変更に応じて DOM を効率的に更新する。
+- **課題:** `innerHTML` 全置換ではなく、`insertBefore` / `removeKey` などを用いた部分更新ロジックの生成が必要。
 
 ### 2. 決定論的 ID 生成と Hydration
-現在は `nanoid` でランダムな ID を生成しているため、リロードのたびにクラス名が変わり、JS 側で `innerHTML` を全置換する必要があります。
+現在は `nanoid` でランダムな ID を生成しているため、リロードのたびにクラス名が変わります。
 - **改善案:** ファイルパスや定義順序に基づいた「変わらない ID」を生成する。
 - **メリット:** 既存の HTML を壊さずにイベントリスナーだけをアタッチする「Hydration」が可能になり、パフォーマンスがさらに向上する。
 
@@ -30,6 +32,3 @@
 現在は単一のコンポーネントのみ動作します。
 - 親から子への **Props** の受け渡し。
 - コンポーネント間でのステート共有メカニズム。
-
-### 5. TypeScript Support in Templates
-JSX 内での型推論を強化し、開発者体験 (DX) を向上させる。

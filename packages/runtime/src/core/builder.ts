@@ -1,5 +1,4 @@
 import { consola } from 'consola'
-import type { VNode } from '../h'
 import { ComponentContext } from './context'
 import { tracker } from './tracker'
 import type {
@@ -9,6 +8,7 @@ import type {
   StateNode,
   ToReader,
   ToSignal,
+  VNode,
 } from './types'
 
 export class ComponentBuilder<S = {}, D = {}, H = {}> {
@@ -106,6 +106,7 @@ export class ComponentBuilder<S = {}, D = {}, H = {}> {
           deps: req.deps,
           fn: () => {},
           templateBody: req.templateBody,
+          isExpression: req.isExpression,
         }
         this.context.nodes.set(req.placeholderId, node)
       })

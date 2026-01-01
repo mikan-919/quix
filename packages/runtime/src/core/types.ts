@@ -16,6 +16,7 @@ export interface DerivedNode extends NodeBase {
   fn: Function
   deps: string[]
   templateBody?: string
+  isExpression?: boolean
 }
 
 export interface HandlerNode extends NodeBase {
@@ -24,19 +25,30 @@ export interface HandlerNode extends NodeBase {
   deps: string[]
 }
 
+export interface VNode {
+  tag: string | Function // ⭐️ 関数も許容
+  html: string
+  instructions: Instruction[]
+  hiddenDerivedRequests: HiddenDerivedRequest[]
+}
+
 export type ComponentNode = StateNode | DerivedNode | HandlerNode
 
 export interface Instruction {
   signalId: string
   selector: string
-  action: 'setText' | 'setAttr' | 'addListener'
+  // ⭐️ 修正: 'show' アクションを追加
+  action: 'setText' | 'setAttr' | 'addListener' | 'show'
   attrName?: string
+  // Show用の追加プロパティ
+  template?: string // 表示時に挿入するHTML文字列
 }
 
 export interface HiddenDerivedRequest {
   deps: string[]
   templateBody: string
   placeholderId: string
+  isExpression?: boolean
 }
 
 // ⬇️ ここから追加: 型推論用ユーティリティ
