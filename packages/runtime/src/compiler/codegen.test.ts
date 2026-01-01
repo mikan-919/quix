@@ -33,7 +33,7 @@ describe('Code Generator', () => {
     // 文字列 "..." ではなく、式として出力されているか確認
     // 変数置換も行われているはず (state.count() -> _a)
     // 期待: const _b = () => _a > 5;
-    expect(output).toMatch(/const _[a-z] = \(\) => _[a-z] > 5;/)
+    expect(output).toMatch(/const _[a-z]\s*=\s*\(\)=>_[a-z]>5;/)
     expect(output).not.toContain('`') // バッククォート（テンプレート文字列）ではない
   })
 

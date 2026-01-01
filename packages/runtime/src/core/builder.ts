@@ -18,7 +18,9 @@ export class ComponentBuilder<S = {}, D = {}, H = {}> {
   constructor(
     private name: string,
     public context: ComponentContext = new ComponentContext(name)
-  ) {}
+  ) {
+    resetIdGenerator(this.name)
+  }
 
   state<K extends string, V>(key: K, value: V) {
     this.context.addState(key, value)
@@ -98,7 +100,12 @@ export class ComponentBuilder<S = {}, D = {}, H = {}> {
 
     this.context.html = vnode.html
     this.context.instructions = vnode.instructions
-
+    // 子コンポーネントから渡されたノードを親の context に登録
+    if (vnode.additionalNodes) {
+      for (const node of vnode.additionalNodes) {
+        this.context.nodes.set(node.id, node)
+      }
+    }
     if (vnode.hiddenDerivedRequests) {
       vnode.hiddenDerivedRequests.forEach((req: any) => {
         const node: any = {

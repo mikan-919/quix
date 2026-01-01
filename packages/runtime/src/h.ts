@@ -1,9 +1,32 @@
+import type { ComponentContext } from './core/context'
 import { generateId } from './core/id'
+import { For, Show } from './core/symbols'
 import { tracker } from './core/tracker'
 import type { HiddenDerivedRequest, Instruction, VNode } from './core/types'
-import { For, Show } from './index'
 
 export function h(tag: any, props: any, ...children: any[]): VNode {
+  if (
+    tag &&
+    typeof tag === 'object' &&
+    'nodes' in tag &&
+    'instructions' in tag
+  ) {
+    const childCtx = tag as ComponentContext
+
+    return {
+      tag: childCtx.name,
+      html: childCtx.html,
+      instructions: childCtx.instructions,
+      hiddenDerivedRequests: [],
+      additionalNodes: childCtx.getAllNodes(), // 子の全ノードを親に渡す
+    }
+  }
+
+  // 2. 通常のHTMLタグ処理
+  const qid = generateId('q') // q-App-x
+  const instructions: Instruction[] = []
+  const hiddenDerivedRequests: HiddenDerivedRequest[] = []
+  const additionalNodes: any[] = []
   // 1. <Show /> コンポーネントの特別処理
   if (tag === Show) {
     const qid = generateId('q') // q-App-x
@@ -44,6 +67,8 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
         const vnode = child as VNode
         instructions.push(...vnode.instructions)
         hiddenDerivedRequests.push(...vnode.hiddenDerivedRequests)
+        if (vnode.additionalNodes)
+          additionalNodes.push(...vnode.additionalNodes)
         childHtmlParts.push(vnode.html)
       } else {
         childHtmlParts.push(String(child))
@@ -64,6 +89,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
       html: `<span class="${qid}" style="display:contents" data-show-anchor></span>`,
       instructions,
       hiddenDerivedRequests,
+      additionalNodes,
     }
   }
 
@@ -71,7 +97,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
     const qid = generateId('q')
     const instructions: Instruction[] = []
 
-    // 1. 依存収集 (props.each を実行して、どのStateに依存しているか特定)
+    // 1. 依存収集
     const listScopeId = generateId('list')
     const deps: string[] = []
 
@@ -79,7 +105,20 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
       tracker.runWithScope(
         listScopeId,
         id => deps.push(id),
-        () => props.each() // 実行して依存を記録
+        () => {
+          // 修正: Babelによってラップされたシグナルをアンラップする
+          // each={state.items} -> (() => state.items)() -> returns Signal Function
+          // each={state.items()} -> (() => state.items())() -> returns Array
+
+          let val = props.each()
+
+          // もし戻り値が関数なら、それは「シグナルそのもの」である可能性が高いので、
+          // さらに実行して値を評価し、依存追跡(tracker.report)を発火させる
+          if (typeof val === 'function') {
+            val = val()
+          }
+          return val
+        }
       )
     }
 
@@ -96,6 +135,9 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
       const vnode = itemRenderer(mockItemSignal)
 
       // HTML文字列内のモックキーを、JSテンプレート変数の ${v} に置換
+      if (vnode && typeof vnode === 'object' && 'html' in vnode)
+        if (vnode.additionalNodes)
+          additionalNodes.push(...vnode.additionalNodes)
       const rawHtml =
         vnode && typeof vnode === 'object' && 'html' in vnode
           ? vnode.html
@@ -120,13 +162,9 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
       html: `<span class="${qid}" style="display:contents" data-for-anchor></span>`,
       instructions,
       hiddenDerivedRequests: [],
+      additionalNodes,
     }
   }
-
-  // 2. 通常のHTMLタグ処理
-  const qid = generateId('q') // q-App-x
-  const instructions: Instruction[] = []
-  const hiddenDerivedRequests: HiddenDerivedRequest[] = []
 
   const staticProps: Record<string, string> = {}
   let needsQid = false
@@ -197,6 +235,8 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
         const vnode = child as VNode
         instructions.push(...vnode.instructions)
         hiddenDerivedRequests.push(...vnode.hiddenDerivedRequests)
+        if (vnode.additionalNodes)
+          additionalNodes.push(...vnode.additionalNodes)
         processedHtml.push(vnode.html)
       } else {
         processedHtml.push(String(child))
@@ -217,5 +257,6 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
     html: `<${tag}${attrStr ? ` ${attrStr}` : ''}>${processedHtml.join('')}</${tag}>`,
     instructions,
     hiddenDerivedRequests,
+    additionalNodes,
   }
 }

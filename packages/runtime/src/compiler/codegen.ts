@@ -1,11 +1,119 @@
+import _generate from '@babel/generator'
+import { parse } from '@babel/parser'
+import _traverse from '@babel/traverse'
+import * as t from '@babel/types'
+import consola from 'consola'
 import type { ComponentContext } from '../core/context'
 import type { DerivedNode } from '../core/types'
 
+// ESM/CommonJSの相互運用性対応
+const traverse = (_traverse as any).default || _traverse
+const generate = (_generate as any).default || _generate
+
+function transformCode(
+  code: string,
+  context: ComponentContext,
+  idToShort: Map<string, string>
+): string {
+  try {
+    const ast = parse(code, {
+      sourceType: 'module',
+      plugins: ['typescript', 'jsx'],
+    })
+
+    traverse(ast, {
+      'ArrowFunctionExpression|FunctionExpression'(path: any) {
+        const params = path.node.params
+
+        // 【修正】引数がある場合はその名前、ない場合は 'state' をデフォルトとする
+        let scopeName = 'state'
+
+        if (params.length > 0) {
+          const scopeParam = params[0]
+          if (t.isIdentifier(scopeParam)) {
+            scopeName = scopeParam.name
+          }
+        }
+
+        path.traverse({
+          CallExpression(innerPath: any) {
+            const callee = innerPath.node.callee
+
+            // MemberExpressionかつ、オブジェクト名が scopeName と一致する場合のみ置換
+            if (
+              t.isMemberExpression(callee) &&
+              t.isIdentifier(callee.object) &&
+              callee.object.name === scopeName && // 's' or 'state'
+              t.isIdentifier(callee.property)
+            ) {
+              const key = callee.property.name
+              const targetNode = context.getNodeByKey(key)
+
+              if (!targetNode) return
+
+              const shortName = idToShort.get(targetNode.id)
+              if (!shortName) return
+
+              const args = innerPath.node.arguments
+
+              if (args.length === 0) {
+                const replacement =
+                  targetNode.type === 'derived'
+                    ? t.callExpression(t.identifier(shortName), [])
+                    : t.identifier(shortName)
+
+                innerPath.replaceWith(replacement)
+              } else if (args.length === 1 && targetNode.type === 'state') {
+                const newValue = args[0]
+                const updateFnName = `_u${shortName}`
+                const assignment = t.assignmentExpression(
+                  '=',
+                  t.identifier(shortName),
+                  newValue
+                )
+                const updateCall = t.callExpression(
+                  t.identifier(updateFnName),
+                  []
+                )
+                const sequence = t.sequenceExpression([assignment, updateCall])
+                innerPath.replaceWith(sequence)
+              }
+            }
+          },
+        })
+      },
+    })
+
+    return generate(ast, {
+      minified: true,
+      comments: false,
+      compact: true,
+    }).code.replace(/;$/, '')
+  } catch (e) {
+    console.error('Codegen Transform Error:', e)
+    return code
+  }
+}
+
 export function generateAppJs(context: ComponentContext) {
+  const logger = consola.withTag('Quix:Codegen') // ロガー作成
   const nodes = context.getAllNodes()
   const instructions = context.instructions
 
-  // ... (変数名マップ作成、参照解決ヘルパー、DOM要素キャッシュ、State宣言、Derived宣言 は変更なし) ...
+  // 1. Debug: コンテキスト情報のダンプ
+  logger.info(`Starting Codegen for ${context.name}`)
+  logger.debug(
+    'Nodes:',
+    nodes.map(n => `${n.key} (${n.id}) [${n.type}]`)
+  )
+  logger.debug(
+    'Instructions:',
+    instructions.map(
+      i => `Action: ${i.action}, Signal: ${i.signalId}, Selector: ${i.selector}`
+    )
+  )
+
+  // ... (変数名マップ作成、参照解決ヘルパー、DOM要素キャッシュ、State宣言 は変更なし) ...
   const idToShort = new Map<string, string>()
   const getShortName = (i: number) =>
     `_${String.fromCharCode(97 + (i % 26))}${i > 25 ? Math.floor(i / 26) : ''}`
@@ -33,74 +141,87 @@ export function generateAppJs(context: ComponentContext) {
     )
     .join('\n')
 
+  // Derived宣言の生成（AST変換を使用）
   const derivedDecls = nodes
     .filter(n => n.type === 'derived')
     .map(n => {
       const node = n as DerivedNode
       const name = idToShort.get(n.id)
       let fnStr = ''
+
       if (node.templateBody) {
         if (node.isExpression) {
+          // 式の場合はアロー関数でラップしてから変換
           fnStr = `() => ${node.templateBody}`
         } else {
+          // テンプレートリテラルの場合
+          // 依存関係の解決はここでも必要だが、単純な変数は正規表現でもリスクが低い
+          // ただし統一のためにASTを通すなら関数化する
+          // 今回は templateBody 内の ${val} はすでに解決済みと仮定するか、
+          // HiddenDerived のロジックを見直す必要がある。
+          // いったん既存ロジックを踏襲しつつ、単純置換で対応（テンプレートリテラル内の複雑な式は稀なため）
+
           const firstDep = node.deps[0]
           const depRef = firstDep ? `\${${getRef(firstDep)}}` : ''
+          // ここはBabelを通さず直接構築（テンプレート文字列のため）
           const body = `\`${node.templateBody.replace('${val}', depRef)}\``
           return `  const ${name} = () => ${body};`
         }
       } else {
         fnStr = node.fn.toString()
       }
-      nodes.forEach(targetNode => {
-        if (targetNode.type === 'handler') return
-        const targetRef = getRef(targetNode.id)
-        const key = targetNode.key
-        const regexCall = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(\\)`, 'g')
-        fnStr = fnStr.replace(regexCall, targetRef!)
-        const regexGet = new RegExp(`[a-zA-Z0-9_]+\\.${key}`, 'g')
-        fnStr = fnStr.replace(regexGet, targetRef!)
-      })
-      return `  const ${name} = ${fnStr};`
+
+      // AST変換を実行
+      // 注意: templateBody由来ではない通常のDerived関数や、Expression由来のコードを変換
+      if (!node.templateBody || node.isExpression) {
+        // 関数全体を変換
+        const transformed = transformCode(fnStr, context, idToShort)
+        return `  const ${name} = ${transformed};`
+      }
+      return `  const ${name} = ${fnStr};` // Fallback
     })
     .join('\n')
 
-  // ⭐️ 追加: デッドコード削除のための判定ロジック
-  // メモ化用のキャッシュ
   const needsUpdateCache = new Map<string, boolean>()
-
   const needsUpdate = (nodeId: string): boolean => {
     if (needsUpdateCache.has(nodeId)) return needsUpdateCache.get(nodeId)!
-
-    // 1. このノード自体に対するDOM操作命令があるか？
+    const nodeShort = idToShort.get(nodeId) || nodeId
     const hasDomOps = instructions.some(i => i.signalId === nodeId)
     if (hasDomOps) {
+      logger.trace(`[DCE] Keep ${nodeShort}: Has DOM Instructions`)
       needsUpdateCache.set(nodeId, true)
       return true
     }
-
-    // 2. このノードに依存している他のノードが、更新を必要としているか？（再帰チェック）
     const dependents = nodes.filter(
       n => n.type === 'derived' && (n as DerivedNode).deps.includes(nodeId)
     )
-
-    // 循環参照防止のために仮でfalseを入れておく
     needsUpdateCache.set(nodeId, false)
-
     const hasActiveDependents = dependents.some(dep => needsUpdate(dep.id))
 
+    if (hasActiveDependents) {
+      logger.trace(`[DCE] Keep ${nodeShort}: Has Active Dependents`)
+    } else {
+      logger.trace(
+        `[DCE] Drop ${nodeShort}: No DOM ops and No Active Dependents`
+      )
+    }
     needsUpdateCache.set(nodeId, hasActiveDependents)
     return hasActiveDependents
   }
 
-  // 5. 更新関数 (Updates) の生成
   const initialCallList: string[] = []
 
   const updates = nodes
     .map(node => {
-      // ⭐️ 修正: 更新が必要ないノード（未使用のDerivedなど）の関数は生成しない
-      if (!needsUpdate(node.id)) return ''
-
+      const shouldKeep = needsUpdate(node.id)
       const sName = idToShort.get(node.id)
+      if (!shouldKeep) {
+        logger.warn(
+          `Dropping update function for ${node.key} (${sName}) because it seems unused.`
+        )
+        return ''
+      }
+      // DOM操作生成（Listアクション対応含む）
       const domOps = instructions
         .filter(i => i.signalId === node.id)
         .map(i => {
@@ -112,7 +233,8 @@ export function generateAppJs(context: ComponentContext) {
             return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)} ? \`${i.template}\` : '';`
           }
           if (i.action === 'list' && i.template) {
-            // _a.map(v => `<div>${v}</div>`).join('')
+            logger.success(`Generating list update for ${node.key} (${sName})`)
+            // ここも ${getRef} はAST変換済み変数名が入る
             return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)}.map(v => \`${i.template}\`).join('');`
           }
           return ''
@@ -124,24 +246,23 @@ export function generateAppJs(context: ComponentContext) {
         .filter(
           n => n.type === 'derived' && (n as DerivedNode).deps.includes(node.id)
         )
-        // ⭐️ 修正: 依存先が更新関数を持っている場合のみ呼び出す
         .filter(n => needsUpdate(n.id))
         .map(n => `    _u${idToShort.get(n.id)}();`)
         .join('\n')
 
-      if (!domOps && !cascades) return ''
-
-      if (node.type === 'state') {
-        initialCallList.push(`_u${sName}()`)
+      if (!domOps && !cascades) {
+        logger.warn(
+          `Node ${node.key} (${sName}) passed DCE but generated NO code inside update function.`
+        )
+        return ''
       }
 
+      if (node.type === 'state') initialCallList.push(`_u${sName}()`)
       if (node.type === 'derived') {
         const isShowCondition = instructions.some(
           inst => inst.signalId === node.id && inst.action === 'show'
         )
-        if (isShowCondition) {
-          initialCallList.push(`_u${sName}()`)
-        }
+        if (isShowCondition) initialCallList.push(`_u${sName}()`)
       }
 
       return `  function _u${sName}() {\n${domOps}\n${cascades}\n  }`
@@ -149,7 +270,7 @@ export function generateAppJs(context: ComponentContext) {
     .filter(Boolean)
     .join('\n')
 
-  // ... (Events, return は変更なし) ...
+  // Event Handlerの変換 (AST変換を使用)
   const events = instructions
     .filter(i => i.action === 'addListener')
     .map(i => {
@@ -157,26 +278,9 @@ export function generateAppJs(context: ComponentContext) {
       const handlerNode = context.getNodeById(i.signalId)
       if (!handlerNode || handlerNode.type !== 'handler') return ''
 
+      // ハンドラ関数を文字列化してAST変換
       let body = handlerNode.fn.toString()
-
-      nodes.forEach(target => {
-        const tName = idToShort.get(target.id)
-        const key = target.key
-        const regexGet = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(\\)`, 'g')
-        const replacement = target.type === 'derived' ? `${tName}()` : tName
-        body = body.replace(regexGet, replacement!)
-      })
-
-      nodes.forEach(target => {
-        if (target.type !== 'state') return
-        const tName = idToShort.get(target.id)
-        const tUpdate = `_u${tName}`
-        const key = target.key
-        const regexSet = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(([^)]+)\\)`, 'g')
-        // ⭐️ 注意: tUpdate が生成されていない場合（Stateがどこにも使われていない）は呼び出さないべきだが
-        // State更新は常に副作用(DOM更新)の起点となるため、needsUpdate(state) は基本trueになるはず
-        body = body.replace(regexSet, `(${tName} = $1, ${tUpdate}())`)
-      })
+      body = transformCode(body, context, idToShort)
 
       return `  if(_e${elIdx}) _e${elIdx}.addEventListener('${i.attrName}', ${body});`
     })

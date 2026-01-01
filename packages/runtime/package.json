@@ -12,6 +12,10 @@
     "dev": "bun --bun ./src/demo.ts --hot --watch"
   },
   "devDependencies": {
+    "@babel/generator": "^7.28.5",
+    "@babel/parser": "^7.28.5",
+    "@babel/traverse": "^7.28.5",
+    "@babel/types": "^7.28.5",
     "@types/bun": "latest"
   },
   "peerDependencies": {

@@ -45,7 +45,6 @@ export function quixPlugin(): Plugin {
     async transform(code, id) {
       if (id.includes('?quix-analyze')) {
         const cleanId = id.replace(/\?quix-analyze$/, '')
-        console.log(transformQuix(code, cleanId))
         return {
           code: transformQuix(code, cleanId),
           map: null,
@@ -78,10 +77,10 @@ export function quixPlugin(): Plugin {
           const transformOptions = isBuild
             ? { minify: true }
             : {
-                minifySyntax: true,
-                minifyIdentifiers: true,
+                // minifySyntax: true,
+                // minifyIdentifiers: true,
                 minifyWhitespace: true,
-                minify: true,
+                // minify: true,
               }
 
           const result = await transform(finalJs, {

@@ -26,10 +26,11 @@ export interface HandlerNode extends NodeBase {
 }
 
 export interface VNode {
-  tag: string | Function // ⭐️ 関数も許容
+  tag: string | Function | any
   html: string
   instructions: Instruction[]
   hiddenDerivedRequests: HiddenDerivedRequest[]
+  additionalNodes?: ComponentNode[]
 }
 
 export type ComponentNode = StateNode | DerivedNode | HandlerNode

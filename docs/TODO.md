@@ -17,6 +17,7 @@
 - **List Rendering (<For>):** 配列データを元にしたリストレンダリング。
     - インターフェース: `<For each={state.items}>{(item) => <div>{item()}</div>}</For>`
     - 実装: `innerHTML` の全置換による更新。
+- **AST-based Codegen:** Babelを使用した堅牢なJavaScriptコード生成。
 
 ## 2. 未実装・不安定な機能 (Missing / Unstable)
 
@@ -34,16 +35,6 @@
 ## 3. リファクタリング提案 & 既知の問題 (Issues)
 
 設計レベルで修正が必要な箇所です。
-
-### A. Codegenの正規表現依存 (`codegen.ts`)
-現在、生成されるJSコード内の変数置換（`state.count()` → `_a`）に正規表現を使用しています。
-```typescript
-// Current Implementation
-const regexCall = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(\\)`, 'g')
-fnStr = fnStr.replace(regexCall, targetRef!)
-```
-- **リスク:** ユーザーが書いたコード内の文字列やコメントに偶発的にマッチして破壊する可能性があります。また、ネストした括弧などの複雑な構文を正しく扱えません。
-- **提案:** Babel Generator や MagicString を用いた、ASTベースまたはより堅牢な置換ロジックへの移行が必要です。
 
 ### B. Showコンポーネントの `innerHTML` 実装
 `<Show>` は現在、アンカー要素の中身を `innerHTML` で書き換えています。
