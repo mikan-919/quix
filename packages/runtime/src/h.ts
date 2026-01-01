@@ -1,18 +1,16 @@
-import { nanoid } from 'nanoid'
+import { generateId } from './core/id'
 import { tracker } from './core/tracker'
 import type { HiddenDerivedRequest, Instruction, VNode } from './core/types'
 import { Show } from './index'
 
-const generateQid = () => `q-${nanoid(6)}`
-
 export function h(tag: any, props: any, ...children: any[]): VNode {
   // 1. <Show /> コンポーネントの特別処理
   if (tag === Show) {
-    const qid = generateQid()
+    const qid = generateId('q') // q-App-x
     const instructions: Instruction[] = []
     const hiddenDerivedRequests: HiddenDerivedRequest[] = []
 
-    const conditionId = `cond-${nanoid(6)}`
+    const conditionId = generateId('cond') // cond-App-x
     const deps = new Set<string>()
     let templateBody = ''
 
@@ -35,7 +33,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
       placeholderId: conditionId,
       deps: Array.from(deps),
       templateBody,
-      isExpression: true, // ⭐️ Showの条件は式として扱う
+      isExpression: true,
     })
 
     const flatChildren = children.flat()
@@ -70,7 +68,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
   }
 
   // 2. 通常のHTMLタグ処理
-  const qid = generateQid()
+  const qid = generateId('q') // q-App-x
   const instructions: Instruction[] = []
   const hiddenDerivedRequests: HiddenDerivedRequest[] = []
 
@@ -102,7 +100,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
 
   if (isTextContent && hasFunction) {
     needsQid = true
-    const tmplId = `hd-${nanoid(6)}`
+    const tmplId = generateId('hd') // hd-App-x
     const deps = new Set<string>()
     const initialHtmlParts: string[] = []
 
@@ -114,7 +112,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
           () => {
             const val = child()
             initialHtmlParts.push(String(val))
-            // ⭐️ 修正: テキスト補間では式抽出を行わず、常にプレースホルダーを使う
+            // テキスト補間では式抽出を行わず、常にプレースホルダーを使う
             return `\${val}`
           }
         )

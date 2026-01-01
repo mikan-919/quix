@@ -78,4 +78,32 @@ describe('Quix Analysis Engine', () => {
     expect(showInst?.signalId).toBe(conditionNode?.id)
     expect(showInst?.template).toBe('<p>Big!</p>')
   })
+
+  test('should generate correct HTML structure', () => {
+    // ID生成をリセットしてテストの独立性を保つ
+    // (通常は render() 内で呼ばれるが、h() は render の外でも動くため念の為)
+    // ただし今回は component(...).render() を経由するので自動でリセットされる
+
+    const ctx = component('TestApp').render(() =>
+      h('div', { id: 'root' }, h('span', null, 'Hello'))
+    )
+
+    // 静的な要素のみなのでQIDは付かず、ID属性だけが残る
+    expect(ctx.html).toBe('<div id="root"><span>Hello</span></div>')
+  })
+
+  test('should generate deterministic IDs', () => {
+    // 2回同じ構成でビルドしたら、全く同じIDになるはず
+    const build = () =>
+      component('App')
+        .state('count', 0)
+        .render(({ state }) => h('div', null, () => state.count()))
+
+    const ctx1 = build()
+    const ctx2 = build()
+
+    expect(ctx1.html).toBe(ctx2.html)
+    // 例: <div class="q-App-1">0</div> のようにIDが含まれる
+    expect(ctx1.html).toContain('App')
+  })
 })

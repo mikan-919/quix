@@ -1,5 +1,6 @@
 import { consola } from 'consola'
 import { ComponentContext } from './context'
+import { resetIdGenerator } from './id'
 import { tracker } from './tracker'
 import type {
   ComponentNode,
@@ -63,6 +64,7 @@ export class ComponentBuilder<S = {}, D = {}, H = {}> {
     }) => VNode
   ) {
     this.logger.start(`Analyzing ${this.name}...`)
+    resetIdGenerator(this.name)
 
     const stateProxy = new Proxy(
       {},
