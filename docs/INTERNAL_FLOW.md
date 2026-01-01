@@ -6,6 +6,39 @@ Quix がソースコード (`.tsx`) をブラウザで動作する JavaScript/HT
 
 Vite サーバー上でリクエストが発生した際に行われる処理です。
 
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Vite as Vite Plugin
+    participant Node as Node.js (SSR)
+    participant Builder as Builder/Runtime
+    participant Codegen
+
+    Browser->>Vite: GET /src/App.tsx
+    Vite->>Node: ssrLoadModule(App.tsx)
+    Note right of Node: Execute component code
+    Node->>Builder: component(...).render()
+    
+    rect rgb(240, 248, 255)
+        note right of Builder: Analysis Phase
+        Builder->>Builder: Proxy State Access (Track Deps)
+        Builder->>Builder: h() Execution (VNode Construction)
+        Builder->>Builder: Extract Hidden Derived (Inline Functions)
+        Builder->>Builder: Generate Instructions (setText, show...)
+    end
+
+    Builder-->>Vite: Return ComponentContext
+    
+    Vite->>Codegen: generateAppJs(Context)
+    Codegen->>Codegen: Optimize Vars (_a, _b...)
+    Codegen->>Codegen: Dead Code Elimination
+    Codegen->>Codegen: Construct Update Functions
+    Codegen-->>Vite: Return Vanilla JS String
+    
+    Vite->>Vite: Transform HTML (Inject Initial HTML)
+    Vite-->>Browser: Return Compiled JS
+```
+
 1.  **Intercept (Vite Plugin)**
     *   `.tsx` へのリクエストを検知。
     *   `ssrLoadModule` を使用して、ユーザーのコンポーネントコードを Node.js 環境で実行します。
@@ -36,6 +69,31 @@ Vite サーバー上でリクエストが発生した際に行われる処理で
 ## Phase 2: ブラウザでの実行 (Runtime)
 
 ブラウザに配信されたファイル (`App.tsx` という名の生成済み JS) の動作です。
+
+```mermaid
+flowchart TD
+    subgraph Init [Initialization]
+        A[Load JS] --> B[Hydration]
+        B -->|querySelector| C["Cache DOM Elements (_e0, _e1...)"]
+        C --> D[Add Event Listeners]
+        D --> E[Initial Render Call]
+        E -->|"Call _u_state()"| F[View Consistent]
+    end
+
+    subgraph Update [State Update Cycle]
+        User((User Interaction)) -->|Click| Handler[Event Handler]
+        Handler -->|Update Variable| State["_a = _a + 1"]
+        State -->|Call Update Fn| UpdateFn["_u_a()"]
+        
+        UpdateFn -->|DOM Operation| DOM[Update textContent / innerHTML]
+        UpdateFn -->|Cascade| DerivedFn["_u_b()"]
+        
+        DerivedFn -->|Recalculate| Calc[Execute Derived Logic]
+        Calc -->|DOM Operation| DOM2[Update Dependent DOM]
+    end
+
+    Init --> User
+```
 
 1.  **Hydration (Initialization)**
     *   `document.getElementById` や `querySelector` を使い、HTML として既に存在する DOM 要素への参照を取得し、変数（`_e0` 等）にキャッシュします。
