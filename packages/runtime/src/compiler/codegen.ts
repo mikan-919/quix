@@ -1,164 +1,167 @@
-export function generateAppJs(component: any) {
-  const { name, bank, handlerBank, instructions } = component
-  const safeId = (id: string) => id.replace(/[^a-zA-Z0-9]/g, '_')
+import type { ComponentContext } from '../core/context'
+import type { DerivedNode } from '../core/types'
 
-  // --- 1. 名前生成器 (a, b, c...z, aa, ab...) ---
-  const getShortName = (index: number): string => {
-    let res = ''
-    let n = index
-    while (n >= 0) {
-      res = String.fromCharCode(97 + (n % 26)) + res
-      n = Math.floor(n / 26) - 1
-    }
-    return `_${res}` // 競合防止のためアンダースコアを付与
-  }
+export function generateAppJs(context: ComponentContext) {
+  const nodes = context.getAllNodes()
+  const instructions = context.instructions
 
-  // --- 2. マッピングの作成 ---
-  const entries = Object.values(bank) as any[]
+  // 1. 変数名マップ作成
   const idToShort = new Map<string, string>()
+  const getShortName = (i: number) =>
+    `_${String.fromCharCode(97 + (i % 26))}${i > 25 ? Math.floor(i / 26) : ''}`
 
-  // 状態/Derived/テンプレートに短い名前を割り振る
-  entries.forEach((e, i) => {
-    idToShort.set(e.id, getShortName(i))
+  nodes.forEach((node, i) => {
+    idToShort.set(node.id, getShortName(i))
   })
 
-  // セレクタ（DOM参照）に短い名前を割り振る
-  const allSelectors = Array.from(
-    new Set(instructions.map((i: any) => i.selector))
-  )
-  const selToShort = new Map<string, string>()
-  allSelectors.forEach((sel, i) => {
-    selToShort.set(sel as string, `_e${getShortName(i)}`)
-  })
-
-  const getInfo = (id: string) => {
-    const entry = entries.find(e => e.id === id)
-    const short = idToShort.get(id) || safeId(id)
-    const isDerived = entry?.isDerived ?? false
-    return {
-      name: short,
-      isDerived,
-      ref: isDerived ? `${short}()` : short, // _a() か _a か
-    }
+  // 参照解決ヘルパー
+  const getRef = (id: string) => {
+    const node = context.getNodeById(id)
+    if (!node) return 'undefined'
+    const name = idToShort.get(id)
+    return node.type === 'derived' ? `${name}()` : name
   }
 
-  // --- 3. 置換ロジック (s.count() -> _a 等) ---
-  const replaceScope = (code: string) => {
-    let result = code
-    // Getter: s.name() -> _a() or _a
-    Object.keys(bank).forEach(key => {
-      const info = getInfo(bank[key].id)
-      const getterRegex = new RegExp(
-        `s(?:\\.${key}|\\[["']${key}["']\\])\\(\\s*\\)`,
-        'g'
-      )
-      result = result.replace(getterRegex, info.ref)
-    })
-    // Setter: s.name(val) -> (_a = val, _u_a())
-    Object.keys(bank).forEach(key => {
-      const info = getInfo(bank[key].id)
-      if (!info.isDerived) {
-        const setterRegex = new RegExp(
-          `s(?:\\.${key}|\\[["']${key}["']\\])\\((.+)\\)`,
-          'g'
-        )
-        result = result.replace(
-          setterRegex,
-          `(${info.name} = $1, _u${info.name}())`
-        )
-      }
-    })
-    return result
-  }
-
-  // --- 4. 依存マップ ---
-  const dependentsMap: Record<string, string[]> = {}
-  entries.forEach(e => {
-    e.deps?.forEach((dId: string) => {
-      ;(dependentsMap[dId] || (dependentsMap[dId] = [])).push(e.id)
-    })
-  })
-
-  // --- 5. コードパーツの生成 ---
-
-  // State宣言
-  const stateDecls = entries
-    .filter(e => !e.isDerived)
-    .map(e => `  let ${idToShort.get(e.id)} = ${JSON.stringify(e.value)};`)
+  // ... (DOMキャッシュ、State宣言は変更なし) ...
+  const selectors = Array.from(new Set(instructions.map(i => i.selector)))
+  const domCache = selectors
+    .map((sel, i) => `  const _e${i} = root.querySelector('${sel}');`)
     .join('\n')
 
-  // Derived/Template宣言
-  const derivedDecls = entries
-    .filter(e => e.isDerived)
-    .map(e => {
-      const short = idToShort.get(e.id)!
-      let body = ''
-      if (e.templateBody) {
-        body = `\`${e.templateBody.replace(/\$\{s\["([\w-]+)"\]\(\)\}/g, (_, key) => `\${${getInfo(bank[key].id).ref}}`)}\``
-      } else {
-        const rawFn = e.value
-          .toString()
-          .replace(/^\s*\(?\s*[a-zA-Z_$][\w$]*\s*\)?\s*=>\s*/, '')
-        body = replaceScope(rawFn)
-      }
-      return `  const ${short} = () => ${body};`
-    })
-    .join('\n')
-
-  // DOMキャッシュ
-  const domCache = allSelectors
+  const stateDecls = nodes
+    .filter(n => n.type === 'state')
     .map(
-      sel =>
-        `  const ${selToShort.get(sel as string)} = root.querySelector('${sel}');`
+      n => `  let ${idToShort.get(n.id)} = ${JSON.stringify((n as any).value)};`
     )
     .join('\n')
 
-  // 更新関数 (up)
-  const updateFns = entries
-    .map(e => {
-      const short = idToShort.get(e.id)!
+  // 4. Derived宣言
+  const derivedDecls = nodes
+    .filter(n => n.type === 'derived')
+    .map(n => {
+      const node = n as DerivedNode
+      const name = idToShort.get(n.id)
+
+      // ⭐️ 修正: User Derived も Hidden Derived も共通の置換ロジックを通す
+      let fnStr = ''
+
+      if (node.templateBody) {
+        // Hidden Derived: テンプレート文字列をアロー関数で包む
+        fnStr = `() => \`${node.templateBody}\``
+      } else {
+        // User Derived: 元の関数文字列を使う
+        fnStr = node.fn.toString()
+      }
+
+      // 変数参照の置換 (Dependency Replacement)
+      nodes.forEach(targetNode => {
+        if (targetNode.type === 'handler') return
+
+        const targetRef = getRef(targetNode.id)
+        const key = targetNode.key
+
+        // ユーザーコードの変数名は何かわからない (state, s, etc)
+        // そのため "任意の変数.key()" というパターンを置換する
+        // [a-zA-Z0-9_]+  --> 変数名にマッチ
+
+        // Getter置換: anyVar.key() -> targetRef
+        const regexCall = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(\\)`, 'g')
+        fnStr = fnStr.replace(regexCall, targetRef!)
+
+        // Getter置換 (プロパティアクセス): anyVar.key -> targetRef
+        const regexGet = new RegExp(`[a-zA-Z0-9_]+\\.${key}`, 'g')
+        fnStr = fnStr.replace(regexGet, targetRef!)
+      })
+
+      return `  const ${name} = ${fnStr};`
+    })
+    .join('\n')
+
+  // ... (Updates, Events生成ロジックも同様に正規表現を修正) ...
+  const initialCallList: string[] = []
+
+  const updates = nodes
+    .map(node => {
+      const sName = idToShort.get(node.id)
       const domOps = instructions
+        .filter(i => i.signalId === node.id)
+        .map(i => {
+          const elIdx = selectors.indexOf(i.selector)
+          if (i.action === 'setText') {
+            return `    if(_e${elIdx}) _e${elIdx}.textContent = ${getRef(node.id)};`
+          }
+          return ''
+        })
+        .filter(Boolean)
+        .join('\n')
+
+      const cascades = nodes
         .filter(
-          (inst: any) => inst.signalId === e.id && inst.action === 'setText'
+          n => n.type === 'derived' && (n as DerivedNode).deps.includes(node.id)
         )
-        .map(
-          (i: any) =>
-            `    if(${selToShort.get(i.selector)}) ${selToShort.get(i.selector)}.textContent = ${getInfo(e.id).ref};`
-        )
+        .map(n => `    _u${idToShort.get(n.id)}();`)
         .join('\n')
-      const cascade = (dependentsMap[e.id] || [])
-        .map(dId => `    _u${idToShort.get(dId)}();`)
-        .join('\n')
-      return domOps || cascade
-        ? `  function _u${short}() {\n${domOps}\n${cascade}\n  }`
-        : ''
+
+      if (!domOps && !cascades) return ''
+
+      if (node.type === 'state') {
+        initialCallList.push(`_u${sName}()`)
+      }
+
+      return `  function _u${sName}() {\n${domOps}\n${cascades}\n  }`
     })
     .filter(Boolean)
     .join('\n')
 
-  // イベント登録
-  const eventListeners = instructions
-    .filter((inst: any) => inst.action === 'addListener')
-    .map((inst: any) => {
-      const handlerFn = handlerBank[inst.signalId]
-      if (!handlerFn) return ''
-      const rawFn = handlerFn
-        .toString()
-        .replace(/^\s*\(?\s*[a-zA-Z_$][\w$]*\s*\)?\s*=>\s*/, '')
-      const body = replaceScope(rawFn)
-      return `  if(${selToShort.get(inst.selector)}) ${selToShort.get(inst.selector)}.addEventListener('${inst.attrName}', () => { ${body} });`
+  // 6. イベントリスナー (ここも正規表現を修正)
+  const events = instructions
+    .filter(i => i.action === 'addListener')
+    .map(i => {
+      const elIdx = selectors.indexOf(i.selector)
+      const handlerNode = context.getNodeById(i.signalId)
+      if (!handlerNode || handlerNode.type !== 'handler') return ''
+
+      let body = handlerNode.fn.toString()
+
+      // 1. Getter置換
+      nodes.forEach(target => {
+        const tName = idToShort.get(target.id)
+        const key = target.key
+        // 任意の変数名.key() -> 参照
+        const regexGet = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(\\)`, 'g')
+        const replacement = target.type === 'derived' ? `${tName}()` : tName
+        body = body.replace(regexGet, replacement!)
+      })
+
+      // 2. Setter置換
+      nodes.forEach(target => {
+        if (target.type !== 'state') return
+        const tName = idToShort.get(target.id)
+        const tUpdate = `_u${tName}`
+        const key = target.key
+        // 任意の変数名.key(...) -> 更新ロジック
+        const regexSet = new RegExp(`[a-zA-Z0-9_]+\\.${key}\\(([^)]+)\\)`, 'g')
+        body = body.replace(regexSet, `(${tName} = $1, ${tUpdate}())`)
+      })
+
+      return `  if(_e${elIdx}) _e${elIdx}.addEventListener('${i.attrName}', ${body});`
     })
     .join('\n')
 
-  return `
-// --- Quix Minified Zero Runtime [${name}] ---
-(function() {
+  return `(function() {
   const root = document.getElementById("app");
   if (!root) return;
+
+  // HTML構造を注入
+  root.innerHTML = ${JSON.stringify(context.html)};
+
 ${domCache}
 ${stateDecls}
 ${derivedDecls}
-${updateFns}
-${eventListeners}
-})();`.trim()
+${updates}
+${events}
+
+  // Initial Render
+${initialCallList.map(call => `  ${call};`).join('\n')}
+})();`
 }

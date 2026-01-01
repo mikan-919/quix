@@ -3,22 +3,19 @@ import { generateAppJs } from '@quix/runtime/compiler'
 import { transformQuix } from '@quix/transform'
 import { transform } from 'esbuild'
 import type { Plugin, ViteDevServer } from 'vite'
-import { createServer } from 'vite' // 💡 追加
+import { createServer } from 'vite'
 
 export function quixPlugin(): Plugin {
-  let server: ViteDevServer
+  let server: ViteDevServer | undefined
   let isBuild = false
 
-  // 💡 解析用サーバーを確保するヘルパー
-  async function ensureServer() {
+  async function ensureBuildServer() {
     if (server) return server
-    // ビルド時はサーバーが存在しないので、最小構成で作成する
     server = await createServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'custom',
-      // 自分のプラグインを再帰的に適用しないよう注意（無限ループ防止）
-      // ただし ?quix-meta を処理するために必要なので、このプラグイン自体も読み込む
       plugins: [quixPlugin()],
+      configFile: false,
     })
     return server
   }
@@ -35,67 +32,127 @@ export function quixPlugin(): Plugin {
       server = _server
     },
 
+    // ⭐️ 追加: コンポーネント更新時はフルリロードする
+    // Quixは「HTML構造」と「JSのDOM取得処理」が密結合なため、
+    // HTMLを再生成しないとHMRで壊れる可能性がある。
+    handleHotUpdate({ file, server }) {
+      if (file.endsWith('.tsx')) {
+        server.ws.send({ type: 'full-reload' })
+        return []
+      }
+    },
+
     async transform(code, id) {
-      // 1. 解析用リクエスト (?quix-meta)
-      if (id.includes('?quix-meta')) {
+      if (id.includes('?quix-analyze')) {
+        const cleanId = id.replace(/\?quix-analyze$/, '')
+        console.log(transformQuix(code, cleanId))
         return {
-          code: transformQuix(code, id),
+          code: transformQuix(code, cleanId),
           map: null,
         }
       }
 
-      // 2. ブラウザ向け JS 生成 (App.tsx)
       if (id.endsWith('.tsx')) {
-        const s = await ensureServer() // 💡 サーバーがあるか確認
+        const s = isBuild ? await ensureBuildServer() : server
+        if (!s) return null
 
-        // 開発時は絶対パス、ビルド時は相対パス等の差異を吸収
-        const metaId = `${id}?quix-meta`
-        const module = await s.ssrLoadModule(metaId)
-        const component = module.default?.default || module.default
+        try {
+          const module = await s.ssrLoadModule(`${id}?quix-analyze`)
+          const exported = module.default?.default || module.default
 
-        if (!component || !component.bank) return null
+          if (!exported) return null
 
-        let finalJs = generateAppJs(component)
+          let context
+          if (exported.context) {
+            context = exported.context
+          } else if (typeof exported.getAllNodes === 'function') {
+            context = exported
+          }
 
-        if (isBuild) {
-          const minified = await transform(finalJs, {
-            minify: true,
+          if (!context) return null
+
+          let finalJs = generateAppJs(context)
+
+          // ⭐️ 修正: esbuildを使って整形・圧縮を行う
+          // ビルド時は完全圧縮、開発時は余白削除のみ
+          const transformOptions = isBuild
+            ? { minify: true }
+            : {
+                minifySyntax: true,
+                minifyIdentifiers: true,
+                minifyWhitespace: true,
+                minify: true,
+              }
+
+          const result = await transform(finalJs, {
+            ...transformOptions,
             target: 'esnext',
             format: 'esm',
           })
-          finalJs = minified.code
-        }
 
-        return {
-          code: finalJs,
-          map: null,
-          contentType: 'application/javascript',
+          finalJs = result.code
+
+          return {
+            code: finalJs,
+            map: null,
+            contentType: 'application/javascript',
+          }
+        } catch (e) {
+          console.error(`[Quix] Compilation failed for ${id}:`, e)
+          throw e
         }
       }
       return null
     },
 
     async transformIndexHtml(html) {
-      // 💡 ビルド時も src/App.tsx を解決できるようにする
-      const s = await ensureServer()
-      const entryPath = path.resolve(s.config.root, 'src/App.tsx')
+      const s = isBuild ? await ensureBuildServer() : server
+      if (!s) return html
+
+      // ⭐️ 修正: 正規表現ですべての script タグを走査し、ユーザーコードを探す
+      const scriptRegex = /<script\s+type="module"\s+src="(.+?)"/g
+      let match
+      let entrySrc = null
+
+      while ((match = scriptRegex.exec(html)) !== null) {
+        const src = match[1]
+        // Vite内部のクライアントスクリプトは無視する
+        if (!src.includes('@vite/client')) {
+          entrySrc = src
+          break
+        }
+      }
+
+      if (!entrySrc) return html
+
+      // パス解決
+      const entryPath = entrySrc.startsWith('/')
+        ? path.join(s.config.root, entrySrc)
+        : entrySrc
 
       try {
-        const module = await s.ssrLoadModule(`${entryPath}?quix-meta`)
-        const component = module.default?.default || module.default
-        if (!component || !component.html) return html
+        const module = await s.ssrLoadModule(`${entryPath}?quix-analyze`)
+        const exported = module.default?.default || module.default
+
+        let context
+        if (exported?.context) {
+          context = exported.context
+        } else if (exported && typeof exported.getAllNodes === 'function') {
+          context = exported
+        }
+
+        if (!context || !context.html) return html
 
         return html.replace(
           /<div\s+id=["']app["']\s*><\/div>/,
-          `<div id="app">${component.html}</div>`
+          `<div id="app">${context.html}</div>`
         )
       } catch (e) {
-        console.error('[Quix] HTML transformation failed:', e)
+        console.error('[Quix] HTML injection failed:', e)
         return html
       }
     },
 
-    // 💡 ビルド終了時に一時サーバーを閉じる
     async buildEnd() {
       if (isBuild && server) {
         await server.close()

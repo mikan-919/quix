@@ -1,4 +1,4 @@
-import { component } from './builder'
+import { component } from './core/builder'
 import { h } from './h'
 
 const App = component('App')
