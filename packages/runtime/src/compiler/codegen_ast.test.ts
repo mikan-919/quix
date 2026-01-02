@@ -84,4 +84,27 @@ describe('AST-based Code Generation', () => {
     expect(output).toContain('.map(')
     expect(output).not.toMatch(/_\w+\(x => x \* 2\)/)
   })
+  test('should handle event arguments in handlers by stripping the scope parameter', () => {
+    const ctx = new ComponentContext('TestApp')
+    ctx.addState('val', '')
+    const valId = ctx.getNodeByKey('val')?.id
+
+    // (s, e) => s.val(e.target.value)
+    const handlerFn = (s: any, e: any) => s.val(e.target.value)
+    ctx.addHandler('onInput', handlerFn as any, [valId!])
+    const handlerId = ctx.getNodeByKey('onInput')?.id
+
+    ctx.instructions.push({
+      signalId: handlerId!,
+      selector: 'input',
+      action: 'addListener',
+      attrName: 'input',
+    })
+
+    const output = generateAppJs(ctx)
+
+    expect(output).toMatch(
+      /\.addEventListener\('input',\s*\(?e\)?\s*=>\s*\(?_a=e\.target\.value,\s*_u_a\(\)\)?/
+    )
+  })
 })

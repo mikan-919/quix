@@ -1,10 +1,9 @@
 import { transformSync } from '@babel/core'
-// @ts-ignore
-import t from '@babel/types'
-// @ts-ignore
-import presetTs from '@babel/preset-typescript'
-// @ts-ignore
+// @ts-expect-error
 import pluginJsx from '@babel/plugin-transform-react-jsx'
+// @ts-expect-error
+import presetTs from '@babel/preset-typescript'
+import t from '@babel/types'
 
 export function transformQuix(code: string, filename: string) {
   const result = transformSync(code, {
@@ -18,6 +17,7 @@ export function transformQuix(code: string, filename: string) {
         return {
           visitor: {
             JSXExpressionContainer(path: any) {
+              // ⭐️ onで始まるイベントハンドラ属性は除外
               if (
                 path.parentPath.isJSXAttribute() &&
                 t.isJSXIdentifier(path.parent.name) &&
@@ -26,11 +26,14 @@ export function transformQuix(code: string, filename: string) {
                 return
               }
               const expr = path.node.expression
+              // すでにアロー関数の場合や空の場合はスキップ
               if (
                 t.isJSXEmptyExpression(expr) ||
                 t.isArrowFunctionExpression(expr)
               )
                 return
+
+              // ⭐️ 属性の値を関数でラップして、h() への遅延評価・依存追跡を可能にする
               path
                 .get('expression')
                 .replaceWith(t.arrowFunctionExpression([], expr))

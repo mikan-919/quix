@@ -1,171 +1,24 @@
-import type { ComponentContext } from './core/context'
+import { ComponentBuilder } from './core/builder'
+import { handleComponent } from './core/components/Component'
+import { handleFor } from './core/components/For'
+import { handleShow } from './core/components/Show'
 import { generateId } from './core/id'
 import { For, Show } from './core/symbols'
 import { tracker } from './core/tracker'
 import type { HiddenDerivedRequest, Instruction, VNode } from './core/types'
 
 export function h(tag: any, props: any, ...children: any[]): VNode {
-  if (
-    tag &&
-    typeof tag === 'object' &&
-    'nodes' in tag &&
-    'instructions' in tag
-  ) {
-    const childCtx = tag as ComponentContext
+  // 1 & 2. Component/Symbols 処理 (既存通り)
+  if (tag instanceof ComponentBuilder || tag?.__quix_builder)
+    return handleComponent(tag, props)
+  if (tag === Show) return handleShow(props, children)
+  if (tag === For) return handleFor(props, children)
 
-    return {
-      tag: childCtx.name,
-      html: childCtx.html,
-      instructions: childCtx.instructions,
-      hiddenDerivedRequests: [],
-      additionalNodes: childCtx.getAllNodes(), // 子の全ノードを親に渡す
-    }
-  }
-
-  // 2. 通常のHTMLタグ処理
-  const qid = generateId('q') // q-App-x
+  // 3. Normal HTML Tags
+  const qid = generateId('q')
   const instructions: Instruction[] = []
   const hiddenDerivedRequests: HiddenDerivedRequest[] = []
   const additionalNodes: any[] = []
-  // 1. <Show /> コンポーネントの特別処理
-  if (tag === Show) {
-    const qid = generateId('q') // q-App-x
-    const instructions: Instruction[] = []
-    const hiddenDerivedRequests: HiddenDerivedRequest[] = []
-
-    const conditionId = generateId('cond') // cond-App-x
-    const deps = new Set<string>()
-    let templateBody = ''
-
-    if (props && typeof props.when === 'function') {
-      tracker.runWithScope(
-        conditionId,
-        id => deps.add(id),
-        () => {
-          props.when() // 実行して依存収集
-
-          // 式の抽出 (例: "() => s.count() > 5" -> "s.count() > 5")
-          const fnStr = props.when.toString()
-          const match = fnStr.match(/=>\s*([\s\S]*)/)
-          templateBody = match ? match[1].trim() : 'false'
-        }
-      )
-    }
-
-    hiddenDerivedRequests.push({
-      placeholderId: conditionId,
-      deps: Array.from(deps),
-      templateBody,
-      isExpression: true,
-    })
-
-    const flatChildren = children.flat()
-    const childHtmlParts: string[] = []
-
-    flatChildren.forEach(child => {
-      if (child && typeof child === 'object' && 'html' in child) {
-        const vnode = child as VNode
-        instructions.push(...vnode.instructions)
-        hiddenDerivedRequests.push(...vnode.hiddenDerivedRequests)
-        if (vnode.additionalNodes)
-          additionalNodes.push(...vnode.additionalNodes)
-        childHtmlParts.push(vnode.html)
-      } else {
-        childHtmlParts.push(String(child))
-      }
-    })
-
-    const templateHtml = childHtmlParts.join('')
-
-    instructions.push({
-      signalId: conditionId,
-      selector: `.${qid}`,
-      action: 'show',
-      template: templateHtml,
-    })
-
-    return {
-      tag: 'Show',
-      html: `<span class="${qid}" style="display:contents" data-show-anchor></span>`,
-      instructions,
-      hiddenDerivedRequests,
-      additionalNodes,
-    }
-  }
-
-  if (tag === For) {
-    const qid = generateId('q')
-    const instructions: Instruction[] = []
-
-    // 1. 依存収集
-    const listScopeId = generateId('list')
-    const deps: string[] = []
-
-    if (props && typeof props.each === 'function') {
-      tracker.runWithScope(
-        listScopeId,
-        id => deps.push(id),
-        () => {
-          // 修正: Babelによってラップされたシグナルをアンラップする
-          // each={state.items} -> (() => state.items)() -> returns Signal Function
-          // each={state.items()} -> (() => state.items())() -> returns Array
-
-          let val = props.each()
-
-          // もし戻り値が関数なら、それは「シグナルそのもの」である可能性が高いので、
-          // さらに実行して値を評価し、依存追跡(tracker.report)を発火させる
-          if (typeof val === 'function') {
-            val = val()
-          }
-          return val
-        }
-      )
-    }
-
-    // 2. テンプレート生成
-    let template = ''
-    const itemRenderer = children[0] // {(item) => ...}
-
-    if (typeof itemRenderer === 'function') {
-      // モックシグナル: 実行されるとユニークなプレースホルダーを返す
-      const MOCK_KEY = '<!--Q_ITEM-->'
-      const mockItemSignal = () => MOCK_KEY
-
-      // レンダラーを実行してVNodeを取得
-      const vnode = itemRenderer(mockItemSignal)
-
-      // HTML文字列内のモックキーを、JSテンプレート変数の ${v} に置換
-      if (vnode && typeof vnode === 'object' && 'html' in vnode)
-        if (vnode.additionalNodes)
-          additionalNodes.push(...vnode.additionalNodes)
-      const rawHtml =
-        vnode && typeof vnode === 'object' && 'html' in vnode
-          ? vnode.html
-          : String(vnode)
-
-      template = rawHtml.replace(MOCK_KEY, '${v}')
-    }
-
-    // 3. 命令生成
-    // 依存Stateが見つかれば、そのIDに対してlist命令を発行
-    if (deps.length > 0) {
-      instructions.push({
-        signalId: deps[0]!, // 主たる依存先（items配列そのもの）
-        selector: `.${qid}`,
-        action: 'list',
-        template,
-      })
-    }
-
-    return {
-      tag: 'For',
-      html: `<span class="${qid}" style="display:contents" data-for-anchor></span>`,
-      instructions,
-      hiddenDerivedRequests: [],
-      additionalNodes,
-    }
-  }
-
   const staticProps: Record<string, string> = {}
   let needsQid = false
 
@@ -180,6 +33,28 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
           attrName: k.toLowerCase().replace(/^on/, ''),
         })
         needsQid = true
+      }
+      // ⭐️ 属性のリアクティブ化の追加
+      else if (typeof v === 'function') {
+        const deps = new Set<string>()
+        // 属性値を一度実行して初期値を取得しつつ、依存関係を収集
+        const val = tracker.runWithScope(
+          generateId('attr'),
+          id => deps.add(id),
+          () => (v as Function)()
+        )
+
+        if (deps.size > 0) {
+          const signalId = Array.from(deps)[0]! // 最初の依存ノードに紐付け
+          instructions.push({
+            signalId,
+            selector: `.${qid}`,
+            action: 'setAttr',
+            attrName: k,
+          })
+          needsQid = true
+        }
+        staticProps[k] = String(val) // 初期値を静的HTML用プロパティに設定
       } else {
         staticProps[k] = String(v)
       }
@@ -188,48 +63,52 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
 
   const flatChildren = children.flat()
   const processedHtml: string[] = []
-
   const isTextContent = flatChildren.every(c => typeof c !== 'object')
   const hasFunction = flatChildren.some(c => typeof c === 'function')
 
   if (isTextContent && hasFunction) {
     needsQid = true
-    const tmplId = generateId('hd') // hd-App-x
-    const deps = new Set<string>()
-    const initialHtmlParts: string[] = []
 
-    const templateParts = flatChildren.map(child => {
-      if (typeof child === 'function') {
-        return tracker.runWithScope(
-          tmplId,
-          id => deps.add(id),
-          () => {
-            const val = child()
-            initialHtmlParts.push(String(val))
-            // テキスト補間では式抽出を行わず、常にプレースホルダーを使う
-            return `\${val}`
-          }
+    // ⭐️ 最適化 C: 単一の関数のみで、他の静的テキストがない場合
+    if (flatChildren.length === 1 && typeof flatChildren[0] === 'function') {
+      const fn = flatChildren[0] as Function
+      const deps = new Set<string>()
+
+      // 依存関係を調査 (checkスコープ)
+      const val = tracker.runWithScope(
+        generateId('check'),
+        id => deps.add(id),
+        () => fn()
+      )
+
+      // 依存している変数が 1 つだけなら、直接その ID を使う (Shortcut!)
+      if (deps.size === 1) {
+        const signalId = Array.from(deps)[0]!
+        instructions.push({ signalId, selector: `.${qid}`, action: 'setText' })
+        processedHtml.push(String(val))
+        // hiddenDerivedRequests への追加は不要（中間ノードをスキップ）
+      } else {
+        // 依存が複数、または 0 の場合は従来通りの処理
+        setupComplexTextInterpolation(
+          qid,
+          flatChildren,
+          instructions,
+          hiddenDerivedRequests,
+          processedHtml
         )
       }
-      const str = String(child)
-      initialHtmlParts.push(str)
-      return str.replace(/[`\\$]/g, '\\$&')
-    })
-
-    hiddenDerivedRequests.push({
-      placeholderId: tmplId,
-      deps: Array.from(deps),
-      templateBody: templateParts.join(''),
-      // isExpression: false (デフォルト)
-    })
-
-    instructions.push({
-      signalId: tmplId,
-      selector: `.${qid}`,
-      action: 'setText',
-    })
-    processedHtml.push(initialHtmlParts.join(''))
+    } else {
+      // 混合テキスト（例: "Count: {count()}"）の場合
+      setupComplexTextInterpolation(
+        qid,
+        flatChildren,
+        instructions,
+        hiddenDerivedRequests,
+        processedHtml
+      )
+    }
   } else {
+    // 4. 子要素の再帰処理 (既存通り)
     flatChildren.forEach(child => {
       if (child && typeof child === 'object' && 'html' in child) {
         const vnode = child as VNode
@@ -238,16 +117,24 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
         if (vnode.additionalNodes)
           additionalNodes.push(...vnode.additionalNodes)
         processedHtml.push(vnode.html)
+      }
+      // ⭐️ 追加: 混合コンテンツ内に関数（シグナル）がある場合
+      else if (typeof child === 'function') {
+        // 関数を span (display:contents) で包んで再帰的に h を呼ぶ
+        // これにより、この関数専用の setText 命令が生成される
+        const wrapped = h('span', { style: 'display:contents' }, child)
+        instructions.push(...wrapped.instructions)
+        hiddenDerivedRequests.push(...wrapped.hiddenDerivedRequests)
+        if (wrapped.additionalNodes)
+          additionalNodes.push(...wrapped.additionalNodes)
+        processedHtml.push(wrapped.html)
       } else {
         processedHtml.push(String(child))
       }
     })
   }
 
-  if (needsQid) {
-    staticProps.class = `${staticProps.class || ''} ${qid}`.trim()
-  }
-
+  if (needsQid) staticProps.class = `${staticProps.class || ''} ${qid}`.trim()
   const attrStr = Object.entries(staticProps)
     .map(([k, v]) => `${k}="${v}"`)
     .join(' ')
@@ -259,4 +146,48 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
     hiddenDerivedRequests,
     additionalNodes,
   }
+}
+
+/**
+ * ⭐️ 複雑なテキスト補間（混合テキストや複数依存）のための共通処理
+ */
+function setupComplexTextInterpolation(
+  qid: string,
+  flatChildren: any[],
+  instructions: Instruction[],
+  hiddenDerivedRequests: HiddenDerivedRequest[],
+  processedHtml: string[]
+) {
+  const tmplId = generateId('hd')
+  const deps = new Set<string>()
+  const initialHtmlParts: string[] = []
+
+  const templateParts = flatChildren.map(child => {
+    if (typeof child === 'function') {
+      return tracker.runWithScope(
+        tmplId,
+        id => deps.add(id),
+        () => {
+          const val = child()
+          initialHtmlParts.push(String(val))
+          return `\${val}`
+        }
+      )
+    }
+    const str = String(child)
+    initialHtmlParts.push(str)
+    return str.replace(/[`\\$]/g, '\\$&')
+  })
+
+  hiddenDerivedRequests.push({
+    placeholderId: tmplId,
+    deps: Array.from(deps),
+    templateBody: templateParts.join(''),
+  })
+  instructions.push({
+    signalId: tmplId,
+    selector: `.${qid}`,
+    action: 'setText',
+  })
+  processedHtml.push(initialHtmlParts.join(''))
 }

@@ -1,3 +1,5 @@
+import type z from 'zod'
+
 export type NodeType = 'state' | 'derived' | 'handler'
 
 export interface NodeBase {
@@ -68,3 +70,19 @@ export type Signal<V> = {
 
 // { count: number } -> { count: Signal<number> }
 export type ToSignal<T> = { [K in keyof T]: Signal<T[K]> }
+export type ToPropsSignal<T> = {
+  [K in keyof T]: () => T[K]
+}
+
+// ⭐️ Builder の内部状態用の型
+export interface ComponentMetadata {
+  name: string
+  propsSchema?: z.ZodObject<any>
+  // ロジックを保持しておき、親の render 時に再実行できるようにする
+  setupFns: {
+    state: Array<{ key: string; valueOrFn: any }>
+    derived: Array<{ key: string; depKeys: string[]; fn: Function }>
+    handler: Array<{ key: string; depKeys: string[]; fn: Function }>
+    render?: (args: any) => VNode
+  }
+}

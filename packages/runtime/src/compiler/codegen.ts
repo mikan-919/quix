@@ -21,66 +21,69 @@ function transformCode(
       plugins: ['typescript', 'jsx'],
     })
 
+    // 1. トップレベルの関数（エントリーポイント）の引数を処理
+    let scopeName = 'state'
+    const body = ast.program.body[0]
+
+    // コードが ExpressionStatement (関数単体) であることを想定
+    if (
+      t.isExpressionStatement(body) &&
+      (t.isArrowFunctionExpression(body.expression) ||
+        t.isFunctionExpression(body.expression))
+    ) {
+      const fn = body.expression
+      if (fn.params.length > 0) {
+        const firstParam = fn.params[0]
+        if (t.isIdentifier(firstParam)) {
+          scopeName = firstParam.name // 's' や 'state' を取得
+        }
+        // ⭐️ ここでだけ引数を削除！ (s, e) -> (e)
+        fn.params = fn.params.slice(1)
+      }
+    }
+
+    // 2. 関数の中身を走査して Getter / Setter を置換
+    // ここでは params の削除は行わず、置換だけを行う
     traverse(ast, {
-      'ArrowFunctionExpression|FunctionExpression'(path: any) {
-        const params = path.node.params
+      CallExpression(innerPath: any) {
+        const callee = innerPath.node.callee
+        if (
+          t.isMemberExpression(callee) &&
+          t.isIdentifier(callee.object) &&
+          callee.object.name === scopeName && // 特定したスコープ名のみ反応
+          t.isIdentifier(callee.property)
+        ) {
+          const key = callee.property.name
+          const targetNode = context.getNodeByKey(key)
+          if (!targetNode) return
 
-        // 【修正】引数がある場合はその名前、ない場合は 'state' をデフォルトとする
-        let scopeName = 'state'
+          const shortName = idToShort.get(targetNode.id)
+          if (!shortName) return
 
-        if (params.length > 0) {
-          const scopeParam = params[0]
-          if (t.isIdentifier(scopeParam)) {
-            scopeName = scopeParam.name
+          const args = innerPath.node.arguments
+          if (args.length === 0) {
+            // Getter: _a() or _a
+            innerPath.replaceWith(
+              targetNode.type === 'derived'
+                ? t.callExpression(t.identifier(shortName), [])
+                : t.identifier(shortName)
+            )
+          } else if (args.length === 1 && targetNode.type === 'state') {
+            // Setter: (_a = val, _u_a())
+            const assignment = t.assignmentExpression(
+              '=',
+              t.identifier(shortName),
+              args[0] as any
+            )
+            const updateCall = t.callExpression(
+              t.identifier(`_u${shortName}`),
+              []
+            )
+            innerPath.replaceWith(
+              t.sequenceExpression([assignment, updateCall])
+            )
           }
         }
-
-        path.traverse({
-          CallExpression(innerPath: any) {
-            const callee = innerPath.node.callee
-
-            // MemberExpressionかつ、オブジェクト名が scopeName と一致する場合のみ置換
-            if (
-              t.isMemberExpression(callee) &&
-              t.isIdentifier(callee.object) &&
-              callee.object.name === scopeName && // 's' or 'state'
-              t.isIdentifier(callee.property)
-            ) {
-              const key = callee.property.name
-              const targetNode = context.getNodeByKey(key)
-
-              if (!targetNode) return
-
-              const shortName = idToShort.get(targetNode.id)
-              if (!shortName) return
-
-              const args = innerPath.node.arguments
-
-              if (args.length === 0) {
-                const replacement =
-                  targetNode.type === 'derived'
-                    ? t.callExpression(t.identifier(shortName), [])
-                    : t.identifier(shortName)
-
-                innerPath.replaceWith(replacement)
-              } else if (args.length === 1 && targetNode.type === 'state') {
-                const newValue = args[0]
-                const updateFnName = `_u${shortName}`
-                const assignment = t.assignmentExpression(
-                  '=',
-                  t.identifier(shortName),
-                  newValue
-                )
-                const updateCall = t.callExpression(
-                  t.identifier(updateFnName),
-                  []
-                )
-                const sequence = t.sequenceExpression([assignment, updateCall])
-                innerPath.replaceWith(sequence)
-              }
-            }
-          },
-        })
       },
     })
 
@@ -89,8 +92,7 @@ function transformCode(
       comments: false,
       compact: true,
     }).code.replace(/;$/, '')
-  } catch (e) {
-    console.error('Codegen Transform Error:', e)
+  } catch (_e) {
     return code
   }
 }
@@ -228,6 +230,16 @@ export function generateAppJs(context: ComponentContext) {
           const elIdx = selectors.indexOf(i.selector)
           if (i.action === 'setText') {
             return `    if(_e${elIdx}) _e${elIdx}.textContent = ${getRef(node.id)};`
+          }
+          // ⭐️ setAttr 命令の処理を追加
+          if (i.action === 'setAttr' && i.attrName) {
+            const attr = i.attrName
+            const ref = getRef(node.id)
+            // 特定のプロパティは直接代入、それ以外は setAttribute を使用
+            if (attr === 'value' || attr === 'checked' || attr === 'disabled') {
+              return `    if(_e${elIdx}) _e${elIdx}.${attr} = ${ref};`
+            }
+            return `    if(_e${elIdx}) _e${elIdx}.setAttribute('${attr}', ${ref});`
           }
           if (i.action === 'show' && i.template) {
             return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)} ? \`${i.template}\` : '';`

@@ -1,58 +1,73 @@
-import { consola } from 'consola'
+import { z } from 'zod'
 import { ComponentContext } from './context'
-import { resetIdGenerator } from './id'
+import { getNextInstanceId, popIdContext, pushIdContext } from './id'
 import { tracker } from './tracker'
 import type {
   ComponentNode,
-  DerivedNode,
   Simplify,
-  StateNode,
+  ToPropsSignal,
   ToReader,
   ToSignal,
   VNode,
 } from './types'
 
-export class ComponentBuilder<S = {}, D = {}, H = {}> {
-  private logger = consola.withTag('Quix:Builder')
+export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
+  private schema?: z.ZodObject<any>
+  private states: Array<{ key: string; valueOrFn: any }> = []
+  private deriveds: Array<{ key: string; depKeys: string[]; fn: Function }> = []
+  private handlers: Array<{ key: string; depKeys: string[]; fn: Function }> = []
+  private renderFn?: (args: any) => VNode
 
-  constructor(
-    private name: string,
-    public context: ComponentContext = new ComponentContext(name)
-  ) {
-    resetIdGenerator(this.name)
+  constructor(public name: string) {}
+
+  props<T extends z.ZodRawShape>(shape: T) {
+    this.schema = z.object(shape)
+    return this as unknown as ComponentBuilder<z.infer<z.ZodObject<T>>, S, D, H>
   }
 
-  state<K extends string, V>(key: K, value: V) {
-    this.context.addState(key, value)
-    return this as unknown as ComponentBuilder<Simplify<S & Record<K, V>>, D, H>
+  state<K extends string, V>(
+    key: K,
+    valueOrFn: V | ((props: ToPropsSignal<P>) => V)
+  ) {
+    this.states.push({ key, valueOrFn })
+    return this as unknown as ComponentBuilder<
+      P,
+      Simplify<S & Record<K, V>>,
+      D,
+      H
+    >
   }
 
   derived<K extends string, V, DepKeys extends (keyof (S & D))[]>(
     key: K,
-    depKeys: [...DepKeys], // 配列リテラルをタプルとして推論させる
-    // ⭐️ 修正: S&D から、DepKeys に含まれるキーだけを Pick して ToReader 化する
-    fn: (scope: ToReader<Simplify<Pick<S & D, DepKeys[number]>>>) => V
+    depKeys: [...DepKeys],
+    fn: (
+      scope: ToReader<Simplify<Pick<S & D, DepKeys[number]>>> & {
+        props: ToPropsSignal<P>
+      }
+    ) => V
   ) {
-    const deps = depKeys.map(k => {
-      const node = this.context.getNodeByKey(String(k))
-      if (!node) throw new Error(`Dependency not found: ${String(k)}`)
-      return node.id
-    })
-
-    this.context.addDerived(key, fn as any, deps)
-    return this as unknown as ComponentBuilder<S, Simplify<D & Record<K, V>>, H>
+    this.deriveds.push({ key, depKeys: depKeys as string[], fn })
+    return this as unknown as ComponentBuilder<
+      P,
+      S,
+      Simplify<D & Record<K, V>>,
+      H
+    >
   }
 
   handler<K extends string, DepKeys extends (keyof (S & D))[]>(
     key: K,
-    _depKeys: [...DepKeys],
-    // ⭐️ 修正: ToSignal<S> & ToReader<D> から、DepKeys に含まれるものだけを Pick
+    depKeys: [...DepKeys],
     fn: (
-      scope: Simplify<Pick<ToSignal<S> & ToReader<D>, DepKeys[number]>>
+      scope: Simplify<Pick<ToSignal<S> & ToReader<D>, DepKeys[number]>> & {
+        props: ToPropsSignal<P>
+      }
     ) => void
   ) {
-    this.context.addHandler(key, fn as any)
+    this.handlers.push({ key, depKeys: depKeys as string[], fn })
     return this as unknown as ComponentBuilder<
+      P,
       S,
       D,
       Simplify<H & Record<K, Function>>
@@ -61,93 +76,150 @@ export class ComponentBuilder<S = {}, D = {}, H = {}> {
 
   render(
     fn: (args: {
-      state: ToReader<Simplify<S & D>> // render内は全部見えて良い
+      state: ToReader<Simplify<S & D>>
       handlers: H
+      props: ToPropsSignal<P>
     }) => VNode
-  ) {
-    this.logger.start(`Analyzing ${this.name}...`)
-    resetIdGenerator(this.name)
-
-    const stateProxy = new Proxy(
-      {},
-      {
-        get: (_, key: string) => {
-          const node = this.context.getNodeByKey(key)
-          if (!node) return undefined
-
-          return () => {
-            tracker.report(node.id)
-            return tracker.silence(() => this.computeValue(node))
-          }
-        },
-      }
-    )
-
-    const handlerProxy = new Proxy(
-      {},
-      {
-        get: (_, key: string) => {
-          const node = this.context.getNodeByKey(key)
-          return `{{HANDLER:${node?.id}}}`
-        },
-      }
-    )
-
-    const vnode = fn({
-      state: stateProxy,
-      handlers: handlerProxy,
-    } as any) as any
-
-    this.context.html = vnode.html
-    this.context.instructions = vnode.instructions
-    // 子コンポーネントから渡されたノードを親の context に登録
-    if (vnode.additionalNodes) {
-      for (const node of vnode.additionalNodes) {
-        this.context.nodes.set(node.id, node)
-      }
-    }
-    if (vnode.hiddenDerivedRequests) {
-      vnode.hiddenDerivedRequests.forEach((req: any) => {
-        const node: any = {
-          id: req.placeholderId,
-          key: `__hidden_${req.placeholderId}`,
-          type: 'derived',
-          deps: req.deps,
-          fn: () => {},
-          templateBody: req.templateBody,
-          isExpression: req.isExpression,
-        }
-        this.context.nodes.set(req.placeholderId, node)
-      })
-    }
-
-    this.logger.success(
-      `Analysis complete. Total nodes: ${this.context.getAllNodes().length}`
-    )
-
-    return this.context
+  ): ComponentContext {
+    this.renderFn = fn
+    // ルート解析
+    const context = this.buildInstance({}, true)
+    // @ts-expect-error
+    context.__quix_builder = this
+    return context
   }
 
-  private computeValue(node: ComponentNode): any {
-    if (node.type === 'state') {
-      return (node as StateNode).value
+  buildInstance(inputProps: any, isRoot = false): ComponentContext {
+    // 1. Zod バリデーション用のアンラップ
+    const peekProps: any = {}
+    for (const key of Object.keys(inputProps)) {
+      const val = inputProps[key]
+      // バリデーションのために一時的に実行。trackerを黙らせて副作用を防ぐ
+      peekProps[key] =
+        typeof val === 'function' ? tracker.silence(() => val()) : val
     }
 
-    if (node.type === 'derived') {
-      const derivedNode = node as DerivedNode
-      const scope = new Proxy(
+    // バリデーション実行（Root時はスキップ）
+    const validatedProps =
+      this.schema && !isRoot ? this.schema.parse(peekProps) : peekProps
+
+    // 2. ID コンテキスト管理
+    pushIdContext(this.name)
+    const instanceId = isRoot ? '' : getNextInstanceId(this.name)
+    const context = new ComponentContext(this.name, instanceId)
+
+    // 3. Props Proxy (実行時に親のシグナルを叩く)
+    const propsProxy = new Proxy(
+      {},
+      {
+        get: (_, key: string) => () => {
+          const val = inputProps[key]
+          return typeof val === 'function' ? val() : validatedProps[key]
+        },
+      }
+    ) as ToPropsSignal<P>
+
+    // 4. ノードの先行登録（依存解決のために先にMapを埋める）
+    for (const { key, valueOrFn } of this.states) {
+      const val =
+        typeof valueOrFn === 'function' ? valueOrFn(propsProxy) : valueOrFn
+      context.addState(key, val)
+    }
+    for (const { key, depKeys, fn } of this.deriveds) {
+      const depIds = depKeys
+        .map(k => context.getNodeByKey(k)?.id)
+        .filter((id): id is string => !!id)
+      context.addDerived(key, fn, depIds)
+    }
+    for (const { key, depKeys, fn } of this.handlers) {
+      const depIds = depKeys
+        .map(k => context.getNodeByKey(k)?.id)
+        .filter((id): id is string => !!id)
+      context.addHandler(key, fn, depIds)
+    }
+
+    // 5. 統合 Proxy (State + Props)
+    const createScopeProxy = () => {
+      return new Proxy(
         {},
         {
           get: (_, key: string) => {
-            const targetNode = this.context.getNodeByKey(key)
-            if (!targetNode) return undefined
-            return () => this.computeValue(targetNode)
+            if (key === 'props') return propsProxy
+            const node = context.getNodeByKey(key)
+            if (!node) return undefined
+            return () => {
+              tracker.report(node.id)
+              return tracker.silence(() =>
+                this.computeValue(context, node, propsProxy)
+              )
+            }
           },
         }
       )
-      return derivedNode.fn(scope)
     }
 
+    // 6. Render 実行
+    if (this.renderFn) {
+      const scope = createScopeProxy()
+      const handlersProxy = new Proxy(
+        {},
+        {
+          get: (_, key: string) => {
+            const node = context.getNodeByKey(key)
+            return node ? `{{HANDLER:${node.id}}}` : ''
+          },
+        }
+      )
+
+      const vnode = this.renderFn({
+        state: scope as any,
+        handlers: handlersProxy as any,
+        props: propsProxy,
+      })
+
+      context.html = vnode.html
+      context.instructions = vnode.instructions
+      if (vnode.additionalNodes) {
+        for (const n of vnode.additionalNodes) context.nodes.set(n.id, n)
+      }
+      if (vnode.hiddenDerivedRequests) {
+        for (const req of vnode.hiddenDerivedRequests) {
+          context.addHiddenDerived(
+            req.deps,
+            req.templateBody,
+            req.isExpression,
+            req.placeholderId
+          )
+        }
+      }
+    }
+
+    popIdContext()
+    return context
+  }
+
+  private computeValue(
+    ctx: ComponentContext,
+    node: ComponentNode,
+    props: any
+  ): any {
+    if (node.type === 'state') return node.value
+    if (node.type === 'derived') {
+      // ⭐️ 修正: スプレッドせずに Proxy をそのまま渡す
+      const scope = new Proxy(
+        {},
+        {
+          get: (_, k: string) => {
+            if (k === 'props') return props
+            const target = ctx.getNodeByKey(k)
+            return target
+              ? () => this.computeValue(ctx, target, props)
+              : undefined
+          },
+        }
+      )
+      return node.fn(scope)
+    }
     return undefined
   }
 }

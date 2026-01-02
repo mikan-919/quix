@@ -1,64 +1,48 @@
-# Quix Concepts & Guidelines
+# Quix Concepts & Guidelines (Revised)
 
 ## 1. Core Philosophy
 
 ### "Build-time Execution, Zero-Runtime Delivery"
-Quixは、アプリケーションコードを**「ブラウザで実行するスクリプト」ではなく、「コンパイラへの指示書」**として扱います。
-コンポーネント定義はビルドプロセスの一部としてNode.js上で実行され、その結果として「最適化された生のJavaScript」が生成されます。
+Quixは、アプリケーションコードを「ブラウザで実行するスクリプト」ではなく、**「コンパイル後のVanilla JSを生成するための指示書」**として扱います。ビルド時に一度だけNode.js上で実行され、その解析結果から、命令的なDOM操作コード（副作用の塊）だけをブラウザへ出力します。
+
+### "Blueprint & Instance"
+`component()` メソッドチェーンは解析を実行するのではなく、コンポーネントの **「設計図（Blueprint）」** を作成します。実際の解析は、親コンポーネントの `render` 内で `h()` 関数がその設計図を検知し、`buildInstance()` を呼び出した瞬間に始まります。これにより、同一コンポーネントを異なる Props で複数回再利用することが可能になります。
 
 ### No Virtual DOM
 実行時に仮想DOMの構築や差分検知（Diffing）は一切行いません。
-`textContent = ...` や `innerHTML = ...` といった、ピンポイントなDOM操作命令にコンパイルされます。
-
-### Explicit Logic, Implicit Wiring
-ユーザーはメソッドチェーンでロジックを明示的に記述しますが、それらがどうDOMに結びつくか（Wiring）は、Proxyとコンパイラが自動的に解決します。
+解析フェーズで「どのステートがどのDOMを書き換えるか」が静的に確定されるため、実行時はピンポイントな `textContent` 更新や `innerHTML` 置換のみが行われます。
 
 ---
 
 ## 2. Coding Style & Conventions
 
-現在のコードベースにおいて推奨される（強制される）スタイルです。
+### Signal Consistency (Everything is a Getter)
+Quixにおいて、動的な値（State, Derived, Props）へのアクセスは、一貫して **関数呼び出し `()`** 形式で行います。
+- **State:** `state.count()`
+- **Derived:** `state.double()`
+- **Props:** `props.age()`
+この統一されたアクセス方法により、Babelプラグインによる自動ラップと、解析時の `tracker` による依存収集が極めてシンプルかつ堅牢に動作します。
 
-### Builder Pattern over Hooks/Classes
-関数コンポーネントやクラスコンポーネントではなく、**Builder Pattern** を採用しています。
+### Zod-Driven Props
+コンポーネント間のインターフェース（Props）は **Zod スキーマ** で定義します。
 ```typescript
-// Good
-export default component('App')
-  .state('count', 0)
-  .render(...)
+.props({
+  age: z.number().min(0),
+  name: z.string().default('Guest')
+})
 ```
-これは、解析フェーズにおいてコンテキストの汚染を防ぎ、型安全性を高めるためです。
-
-### Getter Access for State
-ステートへのアクセスは常に関数呼び出し（Getter）形式で行います。
-これにより、単純な参照とリアクティブな依存を区別し、ビルド時の追跡を確実にします。
-```typescript
-// Good
-state.count() 
-
-// Bad (Quixでは動作しない、または追跡されない)
-state.count
-```
-
-### Inline Functions for Optimization
-JSX内の動的な値は、必ず関数でラップします（Babelプラグインにより自動化されていますが、意識することが重要です）。
-```typescript
-// これにより、"Hidden Derived" として個別に最適化・更新されます
-<p>Count: {() => state.count()}</p>
-```
+これにより、ビルド時のバリデーション（不正な値を渡すとビルドエラーになる）と、TypeScript による強力な型推論を同時に享受できます。
 
 ---
 
 ## 3. Dos and Don'ts for AI Developers
 
-今後の開発において、AI（あなた）が遵守すべきルールです。
-
 ### Dos
-- **コード生成の責務を守る:** 新機能を追加する際は、ランタイムライブラリを太らせるのではなく、`codegen.ts` を修正して「生成されるコード」を変えることを第一に考えること。
-- **決定論的であること:** ID生成やコード出力は、何度実行しても同じ結果になるように設計すること（Hydrationのため）。
-- **型の整合性:** `core/types.ts` の型定義と `builder.ts` の推論ロジックの整合性を常に保つこと。
+- **IDスタックの尊重:** ID生成はスタックベース (`pushIdContext` / `popIdContext`) です。ネストしたコンポーネント解析を行う際は、必ずスタックを管理し、親のカウンターを破壊しないこと。
+- **Zodバリデーションの活用:** Props の評価前には必ず Zod スキーマを通過させること。ただし、バリデーションのための「お試し実行」は `tracker.silence` で囲み、不要な依存関係を吸い込まないようにすること。
+- **シンボル分離の維持:** `For` や `Show` などの特別なコンポーネントは `core/symbols.ts` で管理すること。`h.ts` から `index.ts` をインポートすると循環参照が発生します。
 
 ### Don'ts
-- **Reactのメンタルモデルを持ち込まない:** `useState` や `useEffect` のようなランタイムフックは存在しません。すべては静的な依存グラフとして表現される必要があります。
-- **DOMへの直接アクセスを前提としない:** コンポーネント定義時（解析時）は Node.js 環境で動いています。`window` や `document` に直接アクセスするコードを Builder 内に書いてはいけません（`codegen.ts` が生成する文字列の中に含めるのはOK）。
-- **`innerHTML` の乱用:** `<Show>` コンポーネント等は現在 `innerHTML` を使用していますが、これは入力フォーム等の状態をリセットする副作用があります。可能な限り `textContent` や細粒度のDOM操作を目指すべきです。
+- **Proxyのスプレッド禁止:** `state` や `props` の Proxy オブジェクトをスプレッド演算子 (`...`) で展開してはいけません。Proxy が剥がれ、リアクティビティ（Getterのトラップ能力）が失われます。
+- **Reactメンタルモデルの混同:** `useEffect` などは存在しません。副作用は `handler` か、あるいは `render` 時の命令生成としてのみ表現されます。
+- **ランタイムライブラリへの依存追加:** ブラウザに送信されるコード量を最小化するため、`codegen.ts` で生成される文字列に汎用ライブラリを含めてはいけません。必要な処理は Vanilla JS として出力すること。

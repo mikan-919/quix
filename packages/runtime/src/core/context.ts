@@ -2,42 +2,53 @@ import { generateId } from './id'
 import type { ComponentNode, DerivedNode, Instruction } from './types'
 
 export class ComponentContext {
-  // 名前ベースのマップ (API構築用: "count" -> Node)
   private keyMap = new Map<string, ComponentNode>()
-
-  // IDベースのマップ (Codegen用: "q-xyz" -> Node)
-  // IDはユニークなので、こちらですべてのノード（Hidden Derived含む）を管理
   nodes = new Map<string, ComponentNode>()
-
-  // View情報
   html: string = ''
   instructions: Instruction[] = []
 
-  constructor(public name: string) {}
+  constructor(
+    public name: string,
+    public instanceId: string = ''
+  ) {}
+
+  private createId(prefix: string) {
+    const id = generateId(prefix)
+    return this.instanceId ? `${id}-${this.instanceId}` : id
+  }
 
   addState(key: string, value: any) {
-    const id = generateId('s') // s-App-0
+    const id = this.createId('s')
     const node: ComponentNode = { id, key, type: 'state', value }
     this.keyMap.set(key, node)
     this.nodes.set(id, node)
+    return id
   }
 
   addDerived(key: string, fn: Function, deps: string[]) {
-    const id = generateId('d') // d-App-1
+    const id = this.createId('d')
     const node: ComponentNode = { id, key, type: 'derived', fn, deps }
     this.keyMap.set(key, node)
     this.nodes.set(id, node)
+    return id
   }
 
-  addHandler(key: string, fn: () => void) {
-    const id = generateId('h') // h-App-2
-    const node: ComponentNode = { id, key, type: 'handler', fn, deps: [] }
+  addHandler(key: string, fn: Function, deps: string[]) {
+    const id = this.createId('h')
+    const node: ComponentNode = { id, key, type: 'handler', fn, deps }
     this.keyMap.set(key, node)
     this.nodes.set(id, node)
+    return id
   }
 
-  addHiddenDerived(deps: string[], templateBody: string) {
-    const id = generateId('hd') // hd-App-3
+  // ⭐️ 修正: 外部(h.ts)で生成された id を受け取れるようにする
+  addHiddenDerived(
+    deps: string[],
+    templateBody: string,
+    isExpression?: boolean,
+    providedId?: string
+  ) {
+    const id = providedId || this.createId('hd')
     const node: DerivedNode = {
       id,
       key: `__hidden_${id}`,
@@ -45,6 +56,7 @@ export class ComponentContext {
       fn: () => {},
       deps,
       templateBody,
+      isExpression,
     }
     this.nodes.set(id, node)
     return id
@@ -53,11 +65,9 @@ export class ComponentContext {
   getNodeByKey(key: string) {
     return this.keyMap.get(key)
   }
-
   getNodeById(id: string) {
     return this.nodes.get(id)
   }
-
   getAllNodes() {
     return Array.from(this.nodes.values())
   }
