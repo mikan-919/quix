@@ -1,44 +1,47 @@
-# ToDo, Issues & Refactoring (2026/01/03版)
+# ToDo, Issues & Architectural Roadmap (2026/01/03)
 
-現状のコードベース解析に基づく、実装状況と課題の最新版です。
+Quixの「ビルド時実行・ゼロランタイム」という哲学を維持しつつ、実用的なフレームワークへと進化させるためのタスクリストです。
 
 ## 1. 実装済み機能 (Verified)
+- [x] **Blueprint & Instance Pattern:** コンポーネント定義（設計図）と解析時の実体化の分離。
+- [x] **Zod-driven Props:** ビルド時バリデーションと型安全な親子間通信。
+- [x] **Deterministic ID Management:** スタックベースの `pushIdContext` によるSSR/HydrationセーフなID生成。
+- [x] **Fine-grained Updates:** テキストノードおよび属性（Value, Checked等）のピンポイント更新命令の生成。
+- [x] **Instruction Bubbling:** 子コンポーネントの命令を親コンテキストへ自動集約する解析エンジン。
+- [x] **AST-based Codegen:** Babelを用いた、JavaScriptのスコープを意識したイベントハンドラとSetterの変換。
 
-今日の開発を通じて「確実に動く」ことが確認されたコア機能です。
+## 2. 最優先課題：アーキテクチャの洗練 (Priority: High)
 
-- **Blueprint Builder API:** `ComponentBuilder` を設計図（Blueprint）として扱い、`h()` 呼び出し時に実体化（Instantiation）する高度なコンポーネントシステム。
-- **Zod-driven Props Passing:** Zod スキーマによるビルド時バリデーションと、TypeScript の型推論が完全に統合された親子間通信。
-- **Recursive Component Composition:** 子コンポーネントの命令（Instructions）とノードを親へ再帰的に吸い上げるバブリング・メカニズム。
-- **Reactive Attribute Binding:** `<input value={state.val()}>` 等の、DOM 属性・プロパティに対する細粒度なリアクティブ・バインド。
-- **Event Argument Transformation:** ハンドラの第一引数（scope）を自動削除し、ブラウザの `Event` オブジェクトをシームレスに受け取る AST 変換。
-- **Mixed Content Support:** JSX 内で要素、テキスト、シグナルが混在しても、自動的に透明な `<span>` でラップしてリアクティビティを確保する解析ロジック。
-- **Direct Link Optimization:** 単一シグナルの補間や属性バインドにおいて、中間ノード（Hidden Derived）を生成せず、State と DOM を直接繋ぐ「最短経路」生成。
-- **Stack-based ID Management:** `pushIdContext` / `popIdContext` により、コンポーネントがネストしても ID カウンターが衝突・混乱しない決定論的 ID 生成。
-- **Vite Build-time SSR Injection:** ビルド時に内部 SSR サーバーを立ち上げ、初期 HTML を `index.html` に確実に注入する Vite プラグイン。
-- **Orchestrated JSX Runtime:** `h.ts` をオーケストレーターとし、`Show`, `For`, `Component` 等のハンドラをモジュール分離したクリーンな内部構造。
+### A. Rendering: `innerHTML` から Template Cloning への移行
+現在の `Show` と `For` は `innerHTML` を使用しているため、切り替え時に要素内のフォーカスや入力状態が失われます。
+- [ ] **Static Template Extraction:** 解析時に静的なHTML構造を `<template>` 要素として抽出し、JSの冒頭で宣言する。
+- [ ] **DOM State Preservation:** `cloneNode(true)` と `cached elements` を用いた更新ロジックへの変更。
+- [ ] **Keyed List Support:** `For` において、`innerHTML.map` ではなく、要素の移動・削除を最小限にする `insertBefore` ベースの更新。
 
-## 2. 未実装・不安定な機能 (Missing / Unstable)
+### B. Developer Experience: 糖衣構文の実装
+- [ ] **Two-way Binding (`bind:value`):** `<input bind:value={state.val} />` を `value={state.val()}` と `oninput` ハンドラに自動展開する機能。
+- [ ] **Ref API:** `ref={(el) => ...}` を通じて、ビルド時に特定されたDOM参照（`_e0`等）をハンドラ内で利用可能にする。
 
-### Priority: High (直近の目標)
-- **Two-way Binding (`bind:value`):** `<input bind:value={state.val} />` と書くだけで `value` と `oninput` の両方を自動生成する糖衣構文。
-- **Ref API:** `ref={(el) => ...}` 形式で、生の DOM 要素への参照を取得する仕組み。
-- **List Rendering v2:** `For` において、アイテムだけでなくインデックス `(item, index)` をリアクティブに扱えるようにする拡張。
+## 3. 内部構造のリファクタリング (Priority: Medium)
 
-### Priority: Medium (中期的目標)
-- **Lifecycle Hooks:** `onMount`, `onCleanup` などのライフサイクルイベントのサポート。
-- **True Hydration:** 現在の `innerHTML` による上書きを廃止し、既存の DOM 構造を完全に再利用するシームレスな Hydration への移行。
-- **Style Scoping:** コンポーネント単位の CSS スコープ管理（CSS-in-JS または自動クラス付与）。
+### C. Compiler: 中間表現 (IR) の導入
+解析結果から直接JSを生成するのではなく、最適化可能な中間形式を導入します。
+- [ ] **Instruction Optimizer:** 連続する `setText` 命令の統合や、静的であることが判明したノードの削除を行う。
+- [ ] **Modularity of Codegen:** `codegen.ts` を `Optimizer`, `Emitter`, `Transformer` に分離し、メンテナンス性を向上させる。
 
-## 3. リファクタリング提案 & 既知の問題 (Issues)
+### D. Performance: 真の Hydration (Event Listener-only)
+- [ ] **Hybrid Hydration:** 初期HTMLが既に存在する場合、DOM操作を行わず `addEventListener` と `Variable Initialization` だけを行う軽量な起動パスを Codegen に追加。
 
-### A. Show/For コンポーネントの `innerHTML` 実装
-- **問題:** 表示切り替えのたびに子要素が `innerHTML` で再生成されるため、`<input>` 等の状態がリセットされる。
-- **対策:** `template` 要素と `cloneNode` を用いたノード保持方式への変更。
+### E. Lifecycle & Effects
+- [ ] **Lifecycle Hooks:** `onMount`, `onCleanup` のサポート。これらは Codegen 時に `init` 関数や `window.addEventListener('unload')` 等に変換される。
 
-### B. List Rendering における `indexOf` の静的解決
-- **問題:** `indexOf(name())` 等の解析時実行が、モック値に対して行われるため、初期表示のインデックスが不正確になるケースがある。
-- **対策:** 解析フェーズでの動的計算を許容する「プレースホルダー変数」の導入。
+## 4. 長期的目標 (Priority: Low)
 
-### C. 循環参照の継続的監視
-- **問題:** シンボルの分離により `h.ts` と `index.ts` のサイクルは解消したが、ユーザーコードによる複雑なステート依存（A -> B -> A）における DCE の挙動が未検証。
-- **対策:** 依存グラフのトポロジカルソート等を用いた、より堅牢な解析エンジンの実装。
+- [ ] **Style Scoping:** コンポーネント定義に紐付いたCSSを解析し、自動的にハッシュ化されたクラス名を付与する（ビルド時にCSSファイルを分離抽出）。
+- [ ] **Global State (Store):** コンポーネントの設計図外で定義されたシグナルを、複数のコンポーネントが横断的に参照・更新できる仕組み。
+- [ ] **Advanced Scope Analysis:** より複雑なクロージャや外部変数の参照を安全に扱うための、より厳密な静的解析の実装。
+
+## 5. 既知のバグ・検討事項
+- [ ] **Circular Dependency in Analysis:** ステート A が B に依存し、B が A に依存するようなケースでの無限ループ防止策。
+- [ ] **Shadowing in Handlers:** ハンドラ引数の `e` (Event) がユーザー定義の変数と衝突した場合の回避策。
+- [ ] **FOUC Prevention in Complex Show:** ネストした `Show` コンポーネントにおける、初期表示時の非表示要素のチラつきの完全な抑制。
