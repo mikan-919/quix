@@ -7,9 +7,12 @@
     "@babel/core": "^7.23.0",
     "@babel/plugin-transform-react-jsx": "^7.22.0",
     "@babel/preset-typescript": "^7.23.0",
-    "sucrase": "^3.35.1"
+    "@swc/core": "^1.15.8",
+    "sucrase": "^3.35.1",
+    "swc-walk": "^1.0.1"
   },
   "devDependencies": {
+    "@swc/types": "^0.1.25",
     "@types/babel__core": "^7.20.5"
   }
 }
