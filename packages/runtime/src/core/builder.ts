@@ -4,6 +4,7 @@ import { getNextInstanceId, popIdContext, pushIdContext } from './id'
 import { tracker } from './tracker'
 import type {
   ComponentNode,
+  QuixComponent,
   Simplify,
   ToPropsSignal,
   ToReader,
@@ -12,10 +13,20 @@ import type {
 } from './types'
 
 export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
+  // ComponentBuilder のインスタンスを JSX タグとして認めるように
+  /** @internal */
+  protected readonly _isQuixComponent = true
+  // ダミーの呼び出しシグネチャ（実際には呼び出さないが、TSを騙すため）
+  private __props!: P
+
   private schema?: z.ZodObject<any>
   private states: Array<{ key: string; valueOrFn: any }> = []
   private deriveds: Array<{ key: string; depKeys: string[]; fn: Function }> = []
-  private handlers: Array<{ key: string; depKeys: string[]; fn: Function }> = []
+  private handlers: Array<{
+    key: string
+    depKeys: string[]
+    fn: (scope: any, ...args: any[]) => void
+  }> = []
   private renderFn?: (args: any) => VNode
 
   constructor(public name: string) {}
@@ -56,21 +67,29 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
     >
   }
 
-  handler<K extends string, DepKeys extends (keyof (S & D))[]>(
+  handler<
+    K extends string,
+    DepKeys extends (keyof (S & D))[],
+    // ⭐️ ユーザーが書いた関数の型を F としてキャプチャ
+    F extends (scope: any, ...args: any[]) => void,
+  >(
     key: K,
     depKeys: [...DepKeys],
-    fn: (
-      scope: Simplify<Pick<ToSignal<S> & ToReader<D>, DepKeys[number]>> & {
-        props: ToPropsSignal<P>
-      }
-    ) => void
+    fn: F &
+      ((
+        scope: Simplify<Pick<ToSignal<S> & ToReader<D>, DepKeys[number]>> & {
+          props: ToPropsSignal<P>
+        },
+        ...args: any[]
+      ) => void)
   ) {
     this.handlers.push({ key, depKeys: depKeys as string[], fn })
+    // ⭐️ Record<K, F> とすることで、H に正確な型がマージされます
     return this as unknown as ComponentBuilder<
       P,
       S,
       D,
-      Simplify<H & Record<K, Function>>
+      Simplify<H & Record<K, F>>
     >
   }
 
@@ -80,13 +99,13 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
       handlers: H
       props: ToPropsSignal<P>
     }) => VNode
-  ): ComponentContext {
+  ): QuixComponent<P> {
     this.renderFn = fn
     // ルート解析
     const context = this.buildInstance({}, true)
     // @ts-expect-error
     context.__quix_builder = this
-    return context
+    return context as QuixComponent<P>
   }
 
   buildInstance(inputProps: any, isRoot = false): ComponentContext {

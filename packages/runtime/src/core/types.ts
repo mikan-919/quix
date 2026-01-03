@@ -86,3 +86,7 @@ export interface ComponentMetadata {
     render?: (args: any) => VNode
   }
 }
+export type QuixComponent<P = any> = import('./context').ComponentContext & {
+  (props: P): VNode
+  __quix_builder?: any // 内部用
+}
