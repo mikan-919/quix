@@ -4,5 +4,9 @@ export * from './core/builder'
 export type { ComponentContext } from './core/context'
 // Components (Symbols)
 export * from './core/symbols'
-export type { Instruction, VNode } from './core/types'
+export type {
+  Instruction,
+  QuixComponent,
+  VNode,
+} from './core/types'
 export * from './h'

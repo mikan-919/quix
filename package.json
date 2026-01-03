@@ -5,7 +5,8 @@
     "playground"
   ],
   "scripts": {
-    "dev": "bun --filter playground dev"
+    "dev": "bun --filter playground dev",
+    "build": "bun --filter './packages/transform' build"
   },
   "devDependencies": {
     "@types/bun": "latest",
