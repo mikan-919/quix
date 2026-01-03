@@ -1,3 +1,4 @@
+import consola from 'consola'
 import { z } from 'zod'
 import { ComponentContext } from './context'
 import { getNextInstanceId, popIdContext, pushIdContext } from './id'
@@ -11,6 +12,8 @@ import type {
   ToSignal,
   VNode,
 } from './types'
+
+const logger = consola.withTag('Quix:Builder')
 
 export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
   // ComponentBuilder のインスタンスを JSX タグとして認めるように
@@ -29,7 +32,9 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
   }> = []
   private renderFn?: (args: any) => VNode
 
-  constructor(public name: string) {}
+  constructor(public name: string) {
+    logger.debug(`Define Component: ${name}`)
+  }
 
   props<T extends z.ZodRawShape>(shape: T) {
     this.schema = z.object(shape)
@@ -40,6 +45,7 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
     key: K,
     valueOrFn: V | ((props: ToPropsSignal<P>) => V)
   ) {
+    logger.trace(`[${this.name}] +State: ${key}`)
     this.states.push({ key, valueOrFn })
     return this as unknown as ComponentBuilder<
       P,
@@ -58,6 +64,9 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
       }
     ) => V
   ) {
+    logger.trace(
+      `[${this.name}] +Derived: ${key} (deps: ${depKeys.join(', ')})`
+    )
     this.deriveds.push({ key, depKeys: depKeys as string[], fn })
     return this as unknown as ComponentBuilder<
       P,
@@ -83,8 +92,10 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
         ...args: any[]
       ) => void)
   ) {
+    logger.trace(
+      `[${this.name}] +Handler: ${key} (deps: ${depKeys.join(', ')})`
+    )
     this.handlers.push({ key, depKeys: depKeys as string[], fn })
-    // ⭐️ Record<K, F> とすることで、H に正確な型がマージされます
     return this as unknown as ComponentBuilder<
       P,
       S,
@@ -109,6 +120,8 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
   }
 
   buildInstance(inputProps: any, isRoot = false): ComponentContext {
+    const phase = isRoot ? 'Root Analysis' : 'Child Analysis'
+    logger.info(`Build Instance: <${this.name} /> (${phase})`)
     // 1. Zod バリデーション用のアンラップ
     const peekProps: any = {}
     for (const key of Object.keys(inputProps)) {
@@ -121,6 +134,10 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
     // バリデーション実行（Root時はスキップ）
     const validatedProps =
       this.schema && !isRoot ? this.schema.parse(peekProps) : peekProps
+    // バリデーション成功ログ
+    if (this.schema && !isRoot) {
+      logger.debug(`[${this.name}] Props validated successfully.`)
+    }
 
     // 2. ID コンテキスト管理
     pushIdContext(this.name)
@@ -142,19 +159,22 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
     for (const { key, valueOrFn } of this.states) {
       const val =
         typeof valueOrFn === 'function' ? valueOrFn(propsProxy) : valueOrFn
-      context.addState(key, val)
+      const id = context.addState(key, val)
+      logger.trace(`  -> Register State: ${key} (${id})`)
     }
     for (const { key, depKeys, fn } of this.deriveds) {
       const depIds = depKeys
         .map(k => context.getNodeByKey(k)?.id)
         .filter((id): id is string => !!id)
-      context.addDerived(key, fn, depIds)
+      const id = context.addDerived(key, fn, depIds)
+      logger.trace(`  -> Register Derived: ${key} (${id})`)
     }
     for (const { key, depKeys, fn } of this.handlers) {
       const depIds = depKeys
         .map(k => context.getNodeByKey(k)?.id)
         .filter((id): id is string => !!id)
-      context.addHandler(key, fn, depIds)
+      const id = context.addHandler(key, fn, depIds)
+      logger.trace(`  -> Register Handler: ${key} (${id})`)
     }
 
     // 5. 統合 Proxy (State + Props)
@@ -179,6 +199,7 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
 
     // 6. Render 実行
     if (this.renderFn) {
+      logger.debug(`[${this.name}] Executing render function...`)
       const scope = createScopeProxy()
       const handlersProxy = new Proxy(
         {},
@@ -211,6 +232,9 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
           )
         }
       }
+      logger.debug(
+        `[${this.name}] Render complete. Generated ${vnode.instructions.length} instructions.`
+      )
     }
 
     popIdContext()
