@@ -38,7 +38,6 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
   // 2. テンプレートの生成 (1回だけ実行)
   let templateHtml = ''
   const itemRenderer = children[0]
-  const itemSlots: string[] = []
 
   if (typeof itemRenderer === 'function') {
     const SLOT_MARKER = '<!--Q_SLOT-->'
@@ -57,18 +56,28 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
     if (vnode && typeof vnode === 'object' && 'html' in vnode) {
       if (vnode.additionalNodes) additionalNodes.push(...vnode.additionalNodes)
 
-      // 子要素の命令から itemFns を持つものを集める (スロット順)
-      const itemInstructions = vnode.instructions.filter(i => i.itemFns)
-      for (const inst of itemInstructions) {
-        // biome-ignore lint/style/noNonNullAssertion: filtered
-        itemSlots.push(...inst.itemFns!)
+      // 子要素の命令を分類
+      const nestedItemInstructions: Instruction[] = []
+      if (vnode.instructions) {
+        for (const inst of vnode.instructions) {
+          // itemSignalIdに依存しているか、itemFnsを持っている場合はアイテム内命令
+          const isItemDep =
+            inst.signalId.includes(itemSignalId) ||
+            (inst.itemFns && inst.itemFns.length > 0)
+
+          if (isItemDep) {
+            nestedItemInstructions.push(inst)
+          } else {
+            // それ以外はグローバル命令として親に引き継ぐ
+            instructions.push(inst)
+          }
+        }
       }
 
       // SLOT_MARKER を <q-text> にすべて置換
       if (vnode.html.includes(SLOT_MARKER)) {
         templateHtml = vnode.html.replaceAll(SLOT_MARKER, SLOT_REPLACEMENT)
       } else {
-        // ... (省略)
         const match = vnode.html.match(/^(<[^>]+>)(.*)(<\/[^>]+>)$/)
         if (match) {
           templateHtml = `${match[1]}${SLOT_REPLACEMENT}${match[3]}`
@@ -76,10 +85,27 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
           templateHtml = `<span>${SLOT_REPLACEMENT}</span>`
         }
       }
+
+      // 4. 命令の登録
+      const signalId = deps.size > 0 ? listDerivedId : undefined
+      if (signalId) {
+        instructions.push({
+          signalId,
+          selector: `.${qid}`,
+          action: 'list',
+          template: templateHtml,
+          templateId,
+          listFn: props.each.toString(),
+          itemInstructions:
+            nestedItemInstructions.length > 0
+              ? nestedItemInstructions
+              : undefined,
+        })
+      }
     }
   }
 
-  // 3. each関数をhiddenDerivedとして登録 (変更なし)
+  // 3. each関数をhiddenDerivedとして登録
   if (deps.size > 0) {
     const eachFnStr = props.each.toString()
     hiddenDerivedRequests.push({
@@ -87,20 +113,6 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
       deps: Array.from(deps),
       templateBody: eachFnStr,
       isExpression: true,
-    })
-  }
-
-  // 4. 命令の登録
-  const signalId = deps.size > 0 ? listDerivedId : undefined
-  if (signalId) {
-    instructions.push({
-      signalId,
-      selector: `.${qid}`,
-      action: 'list',
-      template: templateHtml,
-      templateId,
-      listFn: props.each.toString(),
-      itemSlots: itemSlots.length > 0 ? itemSlots : undefined,
     })
   }
 
