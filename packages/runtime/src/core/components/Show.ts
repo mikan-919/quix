@@ -1,12 +1,21 @@
 import { generateId } from '../id'
 import { tracker } from '../tracker'
-import type { HiddenDerivedRequest, Instruction, VNode } from '../types'
+import type {
+  ComponentNode,
+  HiddenDerivedRequest,
+  Instruction,
+  VNode,
+} from '../types'
 
-export function handleShow(props: any, children: any[]): VNode {
+export interface ShowProps {
+  when: () => unknown
+}
+
+export function handleShow(props: ShowProps, children: unknown[]): VNode {
   const qid = generateId('q')
   const instructions: Instruction[] = []
   const hiddenDerivedRequests: HiddenDerivedRequest[] = []
-  const additionalNodes: any[] = []
+  const additionalNodes: ComponentNode[] = []
 
   const conditionId = generateId('cond')
   const deps = new Set<string>()
@@ -14,7 +23,7 @@ export function handleShow(props: any, children: any[]): VNode {
 
   let initialWhen = false
   if (props && typeof props.when === 'function') {
-    initialWhen = tracker.silence(() => props.when())
+    initialWhen = !!tracker.silence(() => props.when())
     tracker.runWithScope(
       conditionId,
       id => deps.add(id),

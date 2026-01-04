@@ -22,6 +22,7 @@ describe('Code Generator: 基本的なコード生成', () => {
     const countId = ctx.getNodeByKey('count')?.id
 
     // 条件: state.count() > 5
+    // biome-ignore lint/style/noNonNullAssertion: testing
     const conditionId = ctx.addHiddenDerived([countId!], 'state.count() > 5')
     const node = ctx.getNodeById(conditionId) as DerivedNode
     node.isExpression = true
@@ -39,6 +40,7 @@ describe('Code Generator: 基本的なコード生成', () => {
     const valId = ctx.getNodeByKey('val')?.id
 
     ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
       signalId: valId!,
       selector: '.anchor',
       action: 'show',
@@ -58,5 +60,37 @@ describe('Code Generator: 基本的なコード生成', () => {
       '_e0.appendChild(_tmpl_tmpl_test_id.content.cloneNode(true))'
     )
     expect(output).toContain('_u_rebind_tmpl_test_id()')
+  })
+
+  test('Forコンポーネントのリスト更新ロジック: _reconcile ヘルパー関数とテンプレートを利用すること', () => {
+    const ctx = new ComponentContext('Test')
+    ctx.addState('items', ['A', 'B'])
+    const itemsId = ctx.getNodeByKey('items')?.id
+
+    ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
+      signalId: itemsId!,
+      selector: '.list-anchor',
+      action: 'list',
+      template: '<div class="item"><q-text></q-text></div>',
+      templateId: 'tmpl-list-id',
+    })
+
+    const output = generateAppJs(ctx)
+
+    // _reconcile 関数の定義が含まれていること
+    expect(output).toContain('function _reconcile(container, items, template)')
+
+    // テンプレートの宣言
+    expect(output).toContain(
+      "const _tmpl_tmpl_list_id = document.getElementById('tmpl-list-id');"
+    )
+
+    // 更新関数内で _reconcile が呼ばれていること
+    // _reconcile(container, items, template)
+    expect(output).toContain('_reconcile(_e0, _a, _tmpl_tmpl_list_id);')
+
+    // innerHTML への直接代入が含まれていないこと
+    expect(output).not.toContain('.innerHTML =')
   })
 })

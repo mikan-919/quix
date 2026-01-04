@@ -1,4 +1,5 @@
-# AGENTS.md - Quix: Super Fine-Grained Signal-Based Compiler Framework
+# AGENTS.md
+以下のことは絶対に従わないといけない。
 
 ## タスクのやり方
 1. ブランチを切る。

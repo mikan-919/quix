@@ -11,7 +11,7 @@ describe('Zod-driven Props: 型安全な親子通信', () => {
 
     const Parent = component('Parent')
       .state('myAge', 25)
-      .render(({ state }) => h(Child as any, { age: state.myAge }))
+      .render(({ state }) => h(Child, { age: state.myAge }))
 
     const allNodes = Parent.getAllNodes()
     const parentAgeNode = allNodes.find(n => n.key === 'myAge')
@@ -31,7 +31,7 @@ describe('Zod-driven Props: 型安全な親子通信', () => {
 
     // number型に string を渡す
     const buildInvalid = () => {
-      component('Parent').render(() => h(Child as any, { count: 'wrong' }))
+      component('Parent').render(() => h(Child, { count: 'wrong' }))
     }
 
     expect(buildInvalid).toThrow()
@@ -42,7 +42,7 @@ describe('Zod-driven Props: 型安全な親子通信', () => {
       .props({ name: z.string().default('Anonymous') })
       .render(({ props }) => h('span', null, props.name))
 
-    const Parent = component('Parent').render(() => h(Child as any, {}))
+    const Parent = component('Parent').render(() => h(Child, {}))
 
     expect(Parent.html).toContain('Anonymous')
   })

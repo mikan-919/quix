@@ -15,21 +15,27 @@ import type {
 
 const logger = consola.withTag('Quix:Builder')
 
+// biome-ignore lint/complexity/noBannedTypes: generic params
 export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
   // ComponentBuilder のインスタンスを JSX タグとして認めるように
   /** @internal */
   protected readonly _isQuixComponent = true
   // ダミーの呼び出しシグネチャ（実際には呼び出さないが、TSを騙すため）
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: phantom type
   private __props!: P
 
+  // biome-ignore lint/suspicious/noExplicitAny: zod schema
   private schema?: z.ZodObject<any>
-  private states: Array<{ key: string; valueOrFn: any }> = []
+  private states: Array<{ key: string; valueOrFn: unknown }> = []
+  // biome-ignore lint/complexity/noBannedTypes: generic function storage
   private deriveds: Array<{ key: string; depKeys: string[]; fn: Function }> = []
   private handlers: Array<{
     key: string
     depKeys: string[]
+    // biome-ignore lint/suspicious/noExplicitAny: dynamic scope and args
     fn: (scope: any, ...args: any[]) => void
   }> = []
+  // biome-ignore lint/suspicious/noExplicitAny: generic render
   private renderFn?: (args: any) => VNode
 
   constructor(public name: string) {
@@ -80,6 +86,7 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
     K extends string,
     DepKeys extends (keyof (S & D))[],
     // ⭐️ ユーザーが書いた関数の型を F としてキャプチャ
+    // biome-ignore lint/suspicious/noExplicitAny: generic constraint
     F extends (scope: any, ...args: any[]) => void,
   >(
     key: K,
@@ -89,7 +96,7 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
         scope: Simplify<Pick<ToSignal<S> & ToReader<D>, DepKeys[number]>> & {
           props: ToPropsSignal<P>
         },
-        ...args: any[]
+        ...args: unknown[]
       ) => void)
   ) {
     logger.trace(
@@ -119,11 +126,14 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
     return context as QuixComponent<P>
   }
 
-  buildInstance(inputProps: any, isRoot = false): ComponentContext {
+  buildInstance(
+    inputProps: Record<string, unknown>,
+    isRoot = false
+  ): ComponentContext {
     const phase = isRoot ? 'Root Analysis' : 'Child Analysis'
     logger.info(`Build Instance: <${this.name} /> (${phase})`)
     // 1. Zod バリデーション用のアンラップ
-    const peekProps: any = {}
+    const peekProps: Record<string, unknown> = {}
     for (const key of Object.keys(inputProps)) {
       const val = inputProps[key]
       // バリデーションのために一時的に実行。trackerを黙らせて副作用を防ぐ
@@ -212,7 +222,9 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
       )
 
       const vnode = this.renderFn({
+        // biome-ignore lint/suspicious/noExplicitAny: proxy casting
         state: scope as any,
+        // biome-ignore lint/suspicious/noExplicitAny: proxy casting
         handlers: handlersProxy as any,
         props: propsProxy,
       })
@@ -244,8 +256,8 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
   private computeValue(
     ctx: ComponentContext,
     node: ComponentNode,
-    props: any
-  ): any {
+    props: Record<string, unknown>
+  ): unknown {
     if (node.type === 'state') return node.value
     if (node.type === 'derived') {
       // ⭐️ 修正: スプレッドせずに Proxy をそのまま渡す

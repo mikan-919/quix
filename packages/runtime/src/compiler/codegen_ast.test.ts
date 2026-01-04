@@ -8,8 +8,9 @@ describe('AST-based Codegen: 高度なJavaScript変換', () => {
     ctx.addState('items', ['A'])
 
     // (s) => s.items([...s.items(), 'B']) 形式のハンドラ
-    const handlerFn = (s: any) => s.items([...s.items(), 'B'])
-    ctx.addHandler('addItem', handlerFn as any, [])
+    const handlerFn = (s: { items: (v?: string[]) => string[] }) =>
+      s.items([...s.items(), 'B'])
+    ctx.addHandler('addItem', handlerFn, [])
     const handlerId = ctx.getNodeByKey('addItem')?.id
 
     if (handlerId) {
@@ -31,8 +32,8 @@ describe('AST-based Codegen: 高度なJavaScript変換', () => {
   test('外部関数呼び出し: 関係のない console.log などは変換されないこと', () => {
     const ctx = new ComponentContext('TestApp')
     ctx.addState('count', 0)
-    const handlerFn = (s: any) => console.log(s.count())
-    ctx.addHandler('logIt', handlerFn as any, [])
+    const handlerFn = (s: { count: () => number }) => console.log(s.count())
+    ctx.addHandler('logIt', handlerFn, [])
 
     const handlerId = ctx.getNodeByKey('logIt')?.id
     if (handlerId) {
@@ -54,8 +55,8 @@ describe('AST-based Codegen: 高度なJavaScript変換', () => {
     const ctx = new ComponentContext('TestApp')
     ctx.addState('dataMap', {}) // 名前が衝突しそうなステート
 
-    const handlerFn = (_s: any) => [1, 2].map(x => x * 2)
-    ctx.addHandler('testMap', handlerFn as any, [])
+    const handlerFn = (_s: unknown) => [1, 2].map(x => x * 2)
+    ctx.addHandler('testMap', handlerFn, [])
 
     const handlerId = ctx.getNodeByKey('testMap')?.id
     if (handlerId) {
@@ -78,16 +79,23 @@ describe('AST-based Codegen: 高度なJavaScript変換', () => {
     const valId = ctx.getNodeByKey('val')?.id
 
     // (s, e) => s.val(e.target.value)
-    const handlerFn = (s: any, e: any) => s.val(e.target.value)
-    ctx.addHandler('onInput', handlerFn as any, [valId!])
+    const handlerFn = (
+      s: { val: (v: string) => void },
+      e: { target: { value: string } }
+    ) => s.val(e.target.value)
+
+    if (valId) ctx.addHandler('onInput', handlerFn, [valId])
 
     const handlerId = ctx.getNodeByKey('onInput')?.id
-    ctx.instructions.push({
-      signalId: handlerId!,
-      selector: 'input',
-      action: 'addListener',
-      attrName: 'input',
-    })
+
+    if (handlerId) {
+      ctx.instructions.push({
+        signalId: handlerId,
+        selector: 'input',
+        action: 'addListener',
+        attrName: 'input',
+      })
+    }
 
     const output = generateAppJs(ctx)
     // scope(s)が消え、e だけが残る
