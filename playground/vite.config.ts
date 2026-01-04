@@ -1,18 +1,12 @@
 import { quixPlugin } from '@quix/vite-plugin'
 import { defineConfig } from 'vite'
-import compression from 'vite-plugin-compression'
+import { compression } from 'vite-plugin-compression2'
 
 export default defineConfig({
   plugins: [
     quixPlugin(),
     compression({
-      algorithm: 'gzip',
-      ext: '.gz',
-    }),
-    // 💡 さらに強力な Brotli 圧縮も生成する場合
-    compression({
-      algorithm: 'brotliCompress',
-      ext: '.br',
+      algorithms: ['gzip', 'brotli', 'zstd'],
     }),
   ],
   esbuild: {

@@ -1,3 +1,4 @@
+import consola from 'consola'
 import { ComponentBuilder } from './core/builder'
 import { handleComponent } from './core/components/Component'
 import { handleFor } from './core/components/For'
@@ -7,12 +8,19 @@ import { For, Show } from './core/symbols'
 import { tracker } from './core/tracker'
 import type { HiddenDerivedRequest, Instruction, VNode } from './core/types'
 
+const logger = consola.withTag('Quix:Runtime')
 export function h(tag: any, props: any, ...children: any[]): VNode {
   // 1 & 2. Component/Symbols 処理 (既存通り)
   if (tag instanceof ComponentBuilder || tag?.__quix_builder)
     return handleComponent(tag, props)
-  if (tag === Show) return handleShow(props, children)
-  if (tag === For) return handleFor(props, children)
+  if (tag === Show) {
+    logger.trace('Processing <Show> block')
+    return handleShow(props, children)
+  }
+  if (tag === For) {
+    logger.trace('Processing <For> loop')
+    return handleFor(props, children)
+  }
 
   // 3. Normal HTML Tags
   const qid = generateId('q')
@@ -33,6 +41,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
           attrName: k.toLowerCase().replace(/^on/, ''),
         })
         needsQid = true
+        logger.trace(`  Bind Handler: ${k} -> ${handlerId}`)
       }
       // ⭐️ 属性のリアクティブ化の追加
       else if (typeof v === 'function') {
@@ -53,6 +62,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
             attrName: k,
           })
           needsQid = true
+          logger.trace(`  Bind Reactive Prop: ${k} -> ${signalId}`)
         }
         staticProps[k] = String(val) // 初期値を静的HTML用プロパティに設定
       } else {
@@ -87,7 +97,13 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
         instructions.push({ signalId, selector: `.${qid}`, action: 'setText' })
         processedHtml.push(String(val))
         // hiddenDerivedRequests への追加は不要（中間ノードをスキップ）
+        logger.debug(
+          `Optimization: Shortcuts direct signal access for <${tag}>`
+        )
       } else {
+        logger.debug(
+          `Optimization: Extracting complex interpolation for <${tag}>`
+        )
         // 依存が複数、または 0 の場合は従来通りの処理
         setupComplexTextInterpolation(
           qid,
@@ -98,6 +114,9 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
         )
       }
     } else {
+      logger.debug(
+        `Optimization: Extracting mixed text interpolation for <${tag}>`
+      )
       // 混合テキスト（例: "Count: {count()}"）の場合
       setupComplexTextInterpolation(
         qid,
@@ -120,6 +139,9 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
       }
       // ⭐️ 追加: 混合コンテンツ内に関数（シグナル）がある場合
       else if (typeof child === 'function') {
+        logger.debug(
+          `Wrapping isolated function child in <span display:contents>`
+        )
         // 関数を span (display:contents) で包んで再帰的に h を呼ぶ
         // これにより、この関数専用の setText 命令が生成される
         const wrapped = h('span', { style: 'display:contents' }, child)

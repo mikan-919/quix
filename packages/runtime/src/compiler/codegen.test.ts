@@ -3,57 +3,60 @@ import { ComponentContext } from '../core/context'
 import type { DerivedNode } from '../core/types'
 import { generateAppJs } from './codegen'
 
-describe('Code Generator', () => {
-  test('should generate state declarations', () => {
+describe('Code Generator: 基本的なコード生成', () => {
+  test('ステート宣言: let変数として適切に出力されること', () => {
     const ctx = new ComponentContext('Test')
     ctx.addState('count', 0)
 
     const output = generateAppJs(ctx)
-    expect(output).toMatch(/let _[a-z] = 0;/)
 
-    // 修正: root.innerHTML が出力に含まれていないことを確認
+    // ステートが let _a = 0; の形式で定義されているか
+    expect(output).toMatch(/let _[a-z] = 0;/)
+    // 不要な innerHTML の初期化が含まれていないこと
     expect(output).not.toContain('root.innerHTML =')
   })
 
-  test('should generate expression for Show component', () => {
+  test('Showコンポーネントの条件式: バッククォートではなく「式」として生成されること', () => {
     const ctx = new ComponentContext('Test')
     ctx.addState('count', 0)
     const countId = ctx.getNodeByKey('count')?.id
 
-    // Showの条件式を模倣したノードを追加
-    // s.count() > 5 という式
+    // 条件: state.count() > 5
     const conditionId = ctx.addHiddenDerived([countId!], 'state.count() > 5')
-
-    // isExpressionフラグを手動で立てる
     const node = ctx.getNodeById(conditionId) as DerivedNode
     node.isExpression = true
 
     const output = generateAppJs(ctx)
 
-    // 文字列 "..." ではなく、式として出力されているか確認
-    // 変数置換も行われているはず (state.count() -> _a)
-    // 期待: const _b = () => _a > 5;
+    // 期待値: const _b = () => _a > 5; （文字列リテラルではなく実行可能な関数）
     expect(output).toMatch(/const _[a-z]\s*=\s*\(\)=>_[a-z]>5;/)
-    expect(output).not.toContain('`') // バッククォート（テンプレート文字列）ではない
+    expect(output).not.toContain('`')
   })
 
-  test('should generate show instruction update logic', () => {
+  test('Show命令の更新ロジック: HTMLテンプレートからの取得とクローニングに加え、リバインドの呼び出し', () => {
     const ctx = new ComponentContext('Test')
     ctx.addState('val', true)
     const valId = ctx.getNodeByKey('val')?.id
-    expect(valId).toBeString()
-    // show命令を追加
+
     ctx.instructions.push({
       signalId: valId!,
       selector: '.anchor',
       action: 'show',
       template: '<p>Hi</p>',
+      templateId: 'tmpl-test-id',
     })
 
     const output = generateAppJs(ctx)
 
-    // innerHTML の切り替えロジックが含まれているか
-    // 条件 ? `template` : ''
-    expect(output).toMatch(/\.innerHTML = _[a-z] \? `<p>Hi<\/p>` : '';/)
+    // テンプレート取得ロジック
+    expect(output).toContain(
+      "const _tmpl_tmpl_test_id = document.getElementById('tmpl-test-id');"
+    )
+    // クローニングとリバインドロジック
+    expect(output).toContain('if(!_e0.firstChild)')
+    expect(output).toContain(
+      '_e0.appendChild(_tmpl_tmpl_test_id.content.cloneNode(true))'
+    )
+    expect(output).toContain('_u_rebind_tmpl_test_id()')
   })
 })

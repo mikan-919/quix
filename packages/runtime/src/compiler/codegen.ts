@@ -6,26 +6,24 @@ import consola from 'consola'
 import type { ComponentContext } from '../core/context'
 import type { DerivedNode } from '../core/types'
 
-// ESM/CommonJSの相互運用性対応
 const traverse = (_traverse as any).default || _traverse
 const generate = (_generate as any).default || _generate
 
+// AST変換関数 (transformCode) は変更なし
 function transformCode(
   code: string,
   context: ComponentContext,
   idToShort: Map<string, string>
 ): string {
+  // ... (省略)
   try {
     const ast = parse(code, {
       sourceType: 'module',
       plugins: ['typescript', 'jsx'],
     })
-
-    // 1. トップレベルの関数（エントリーポイント）の引数を処理
+    // ... (既存のロジック)
     let scopeName = 'state'
     const body = ast.program.body[0]
-
-    // コードが ExpressionStatement (関数単体) であることを想定
     if (
       t.isExpressionStatement(body) &&
       (t.isArrowFunctionExpression(body.expression) ||
@@ -35,22 +33,18 @@ function transformCode(
       if (fn.params.length > 0) {
         const firstParam = fn.params[0]
         if (t.isIdentifier(firstParam)) {
-          scopeName = firstParam.name // 's' や 'state' を取得
+          scopeName = firstParam.name
         }
-        // ⭐️ ここでだけ引数を削除！ (s, e) -> (e)
         fn.params = fn.params.slice(1)
       }
     }
-
-    // 2. 関数の中身を走査して Getter / Setter を置換
-    // ここでは params の削除は行わず、置換だけを行う
     traverse(ast, {
       CallExpression(innerPath: any) {
         const callee = innerPath.node.callee
         if (
           t.isMemberExpression(callee) &&
           t.isIdentifier(callee.object) &&
-          callee.object.name === scopeName && // 特定したスコープ名のみ反応
+          callee.object.name === scopeName &&
           t.isIdentifier(callee.property)
         ) {
           const key = callee.property.name
@@ -62,14 +56,12 @@ function transformCode(
 
           const args = innerPath.node.arguments
           if (args.length === 0) {
-            // Getter: _a() or _a
             innerPath.replaceWith(
               targetNode.type === 'derived'
                 ? t.callExpression(t.identifier(shortName), [])
                 : t.identifier(shortName)
             )
           } else if (args.length === 1 && targetNode.type === 'state') {
-            // Setter: (_a = val, _u_a())
             const assignment = t.assignmentExpression(
               '=',
               t.identifier(shortName),
@@ -86,7 +78,6 @@ function transformCode(
         }
       },
     })
-
     return generate(ast, {
       minified: true,
       comments: false,
@@ -98,24 +89,15 @@ function transformCode(
 }
 
 export function generateAppJs(context: ComponentContext) {
-  const logger = consola.withTag('Quix:Codegen') // ロガー作成
+  const logger = consola.withTag('Quix:Codegen')
   const nodes = context.getAllNodes()
   const instructions = context.instructions
 
-  // 1. Debug: コンテキスト情報のダンプ
-  logger.info(`Starting Codegen for ${context.name}`)
+  logger.info(`Generating JS for App: ${context.name}`)
   logger.debug(
-    'Nodes:',
-    nodes.map(n => `${n.key} (${n.id}) [${n.type}]`)
-  )
-  logger.debug(
-    'Instructions:',
-    instructions.map(
-      i => `Action: ${i.action}, Signal: ${i.signalId}, Selector: ${i.selector}`
-    )
+    `Analysis Result: ${nodes.length} nodes, ${instructions.length} instructions`
   )
 
-  // ... (変数名マップ作成、参照解決ヘルパー、DOM要素キャッシュ、State宣言 は変更なし) ...
   const idToShort = new Map<string, string>()
   const getShortName = (i: number) =>
     `_${String.fromCharCode(97 + (i % 26))}${i > 25 ? Math.floor(i / 26) : ''}`
@@ -124,6 +106,7 @@ export function generateAppJs(context: ComponentContext) {
     idToShort.set(node.id, getShortName(i))
   })
 
+  // ... (getRef, selectors, domCache, stateDecls, derivedDecls はそのまま)
   const getRef = (id: string) => {
     const node = context.getNodeById(id)
     if (!node) return 'undefined'
@@ -131,9 +114,52 @@ export function generateAppJs(context: ComponentContext) {
     return node.type === 'derived' ? `${name}()` : name
   }
 
+  const showInsts = instructions.filter(
+    i => i.action === 'show' && i.templateId
+  )
+  const selectorsInsideShow = new Set<string>()
+  for (const si of showInsts) {
+    for (const i of instructions) {
+      if (
+        i.selector !== si.selector &&
+        si.template?.includes(i.selector.replace(/^\./, ''))
+      ) {
+        selectorsInsideShow.add(i.selector)
+      }
+    }
+  }
+
   const selectors = Array.from(new Set(instructions.map(i => i.selector)))
   const domCache = selectors
-    .map((sel, i) => `  const _e${i} = root.querySelector('${sel}');`)
+    .map((sel, i) => {
+      const isInside = selectorsInsideShow.has(sel)
+      return `  ${isInside ? 'let' : 'const'} _e${i} = root.querySelector('${sel}');`
+    })
+    .join('\n')
+
+  const templateDecls = showInsts
+    .map(si => {
+      const tId = si.templateId!.replace(/-/g, '_')
+      return `  const _tmpl_${tId} = document.getElementById('${si.templateId}');`
+    })
+    .join('\n')
+
+  const rebindFns = showInsts
+    .map(si => {
+      const tId = si.templateId!.replace(/-/g, '_')
+      const internalInsts = instructions.filter(
+        i =>
+          i.selector !== si.selector &&
+          si.template?.includes(i.selector.replace(/^\./, ''))
+      )
+      const rebindBody = Array.from(new Set(internalInsts.map(i => i.selector)))
+        .map(sel => {
+          const idx = selectors.indexOf(sel)
+          return `    _e${idx} = root.querySelector('${sel}');`
+        })
+        .join('\n')
+      return `  function _u_rebind_${tId}() {\n${rebindBody}\n  }`
+    })
     .join('\n')
 
   const stateDecls = nodes
@@ -143,68 +169,69 @@ export function generateAppJs(context: ComponentContext) {
     )
     .join('\n')
 
-  // Derived宣言の生成（AST変換を使用）
   const derivedDecls = nodes
     .filter(n => n.type === 'derived')
     .map(n => {
+      // ... (既存のDerived生成ロジック)
       const node = n as DerivedNode
       const name = idToShort.get(n.id)
       let fnStr = ''
-
       if (node.templateBody) {
         if (node.isExpression) {
-          // 式の場合はアロー関数でラップしてから変換
           fnStr = `() => ${node.templateBody}`
         } else {
-          // テンプレートリテラルの場合
-          // 依存関係の解決はここでも必要だが、単純な変数は正規表現でもリスクが低い
-          // ただし統一のためにASTを通すなら関数化する
-          // 今回は templateBody 内の ${val} はすでに解決済みと仮定するか、
-          // HiddenDerived のロジックを見直す必要がある。
-          // いったん既存ロジックを踏襲しつつ、単純置換で対応（テンプレートリテラル内の複雑な式は稀なため）
-
           const firstDep = node.deps[0]
           const depRef = firstDep ? `\${${getRef(firstDep)}}` : ''
-          // ここはBabelを通さず直接構築（テンプレート文字列のため）
           const body = `\`${node.templateBody.replace('${val}', depRef)}\``
           return `  const ${name} = () => ${body};`
         }
       } else {
         fnStr = node.fn.toString()
       }
-
-      // AST変換を実行
-      // 注意: templateBody由来ではない通常のDerived関数や、Expression由来のコードを変換
       if (!node.templateBody || node.isExpression) {
-        // 関数全体を変換
         const transformed = transformCode(fnStr, context, idToShort)
         return `  const ${name} = ${transformed};`
       }
-      return `  const ${name} = ${fnStr};` // Fallback
+      return `  const ${name} = ${fnStr};`
     })
     .join('\n')
 
+  // Dead Code Elimination のロギング強化
   const needsUpdateCache = new Map<string, boolean>()
+
+  // 統計用カウンター
+  let droppedCount = 0
+  let keptCount = 0
+
   const needsUpdate = (nodeId: string): boolean => {
     if (needsUpdateCache.has(nodeId)) return needsUpdateCache.get(nodeId)!
+
     const nodeShort = idToShort.get(nodeId) || nodeId
+    const nodeKey = context.getNodeById(nodeId)?.key || 'unknown'
+    const debugName = `${nodeKey}(${nodeShort})`
+
+    // 1. 直接DOM操作を持っているか？
     const hasDomOps = instructions.some(i => i.signalId === nodeId)
     if (hasDomOps) {
-      logger.trace(`[DCE] Keep ${nodeShort}: Has DOM Instructions`)
+      // logger.trace(`[Keep] ${debugName}: Has direct DOM instructions`)
       needsUpdateCache.set(nodeId, true)
       return true
     }
+
+    // 2. 依存しているDerivedがアクティブか？ (再帰)
     const dependents = nodes.filter(
       n => n.type === 'derived' && (n as DerivedNode).deps.includes(nodeId)
     )
+    // 循環防止のため一旦falseセット
     needsUpdateCache.set(nodeId, false)
+
     const hasActiveDependents = dependents.some(dep => needsUpdate(dep.id))
 
     if (hasActiveDependents) {
-      logger.trace(`[DCE] Keep ${nodeShort}: Has Active Dependents`)
+      // logger.trace(`[Keep] ${debugName}: Needed by active dependents`)
     } else {
-      logger.trace(
-        `[DCE] Drop ${nodeShort}: No DOM ops and No Active Dependents`
+      logger.debug(
+        `[DCE:Drop] ${debugName}: No DOM ops and No Active Dependents`
       )
     }
     needsUpdateCache.set(nodeId, hasActiveDependents)
@@ -217,13 +244,14 @@ export function generateAppJs(context: ComponentContext) {
     .map(node => {
       const shouldKeep = needsUpdate(node.id)
       const sName = idToShort.get(node.id)
+
       if (!shouldKeep) {
-        logger.warn(
-          `Dropping update function for ${node.key} (${sName}) because it seems unused.`
-        )
+        droppedCount++
         return ''
       }
-      // DOM操作生成（Listアクション対応含む）
+      keptCount++
+
+      // ... (DOM操作生成ロジックはそのまま)
       const domOps = instructions
         .filter(i => i.signalId === node.id)
         .map(i => {
@@ -231,22 +259,29 @@ export function generateAppJs(context: ComponentContext) {
           if (i.action === 'setText') {
             return `    if(_e${elIdx}) _e${elIdx}.textContent = ${getRef(node.id)};`
           }
-          // ⭐️ setAttr 命令の処理を追加
           if (i.action === 'setAttr' && i.attrName) {
             const attr = i.attrName
             const ref = getRef(node.id)
-            // 特定のプロパティは直接代入、それ以外は setAttribute を使用
             if (attr === 'value' || attr === 'checked' || attr === 'disabled') {
               return `    if(_e${elIdx}) _e${elIdx}.${attr} = ${ref};`
             }
             return `    if(_e${elIdx}) _e${elIdx}.setAttribute('${attr}', ${ref});`
           }
-          if (i.action === 'show' && i.template) {
-            return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)} ? \`${i.template}\` : '';`
+          if (i.action === 'show' && i.templateId) {
+            const tId = i.templateId.replace(/-/g, '_')
+            return `    if(_e${elIdx}) {
+      const _cond = ${getRef(node.id)};
+      if(_cond) {
+        if(!_e${elIdx}.firstChild) {
+          if(_tmpl_${tId}) _e${elIdx}.appendChild(_tmpl_${tId}.content.cloneNode(true));
+        }
+        _u_rebind_${tId}();
+      } else {
+        _e${elIdx}.innerHTML = '';
+      }
+    }`
           }
           if (i.action === 'list' && i.template) {
-            logger.success(`Generating list update for ${node.key} (${sName})`)
-            // ここも ${getRef} はAST変換済み変数名が入る
             return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)}.map(v => \`${i.template}\`).join('');`
           }
           return ''
@@ -263,12 +298,12 @@ export function generateAppJs(context: ComponentContext) {
         .join('\n')
 
       if (!domOps && !cascades) {
-        logger.warn(
-          `Node ${node.key} (${sName}) passed DCE but generated NO code inside update function.`
-        )
+        // 残す判定にはなったが、実質空の関数になる場合
+        logger.debug(`[DCE:Empty] ${node.key} (${sName}) has empty update fn.`)
         return ''
       }
 
+      // Initial Renderリストへの追加
       if (node.type === 'state') initialCallList.push(`_u${sName}()`)
       if (node.type === 'derived') {
         const isShowCondition = instructions.some(
@@ -282,27 +317,30 @@ export function generateAppJs(context: ComponentContext) {
     .filter(Boolean)
     .join('\n')
 
-  // Event Handlerの変換 (AST変換を使用)
+  // イベント生成処理はそのまま
   const events = instructions
     .filter(i => i.action === 'addListener')
     .map(i => {
       const elIdx = selectors.indexOf(i.selector)
       const handlerNode = context.getNodeById(i.signalId)
       if (!handlerNode || handlerNode.type !== 'handler') return ''
-
-      // ハンドラ関数を文字列化してAST変換
       let body = handlerNode.fn.toString()
       body = transformCode(body, context, idToShort)
-
       return `  if(_e${elIdx}) _e${elIdx}.addEventListener('${i.attrName}', ${body});`
     })
     .join('\n')
+
+  logger.success(
+    `Codegen Complete: kept=${keptCount} nodes, dropped=${droppedCount} nodes`
+  )
 
   return `(function() {
   const root = document.getElementById("app");
   if (!root) return;
 
 ${domCache}
+${templateDecls}
+${rebindFns}
 ${stateDecls}
 ${derivedDecls}
 ${updates}

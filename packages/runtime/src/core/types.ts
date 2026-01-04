@@ -43,6 +43,7 @@ export interface Instruction {
   action: 'setText' | 'setAttr' | 'addListener' | 'show' | 'list'
   attrName?: string
   template?: string
+  templateId?: string
 }
 
 export interface HiddenDerivedRequest {
