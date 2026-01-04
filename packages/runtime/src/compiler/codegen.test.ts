@@ -79,7 +79,9 @@ describe('Code Generator: 基本的なコード生成', () => {
     const output = generateAppJs(ctx)
 
     // _reconcile 関数の定義が含まれていること
-    expect(output).toContain('function _reconcile(container, items, template)')
+    expect(output).toContain(
+      'function _reconcile(container, items, template, slotFns)'
+    )
 
     // テンプレートの宣言
     expect(output).toContain(
@@ -87,8 +89,8 @@ describe('Code Generator: 基本的なコード生成', () => {
     )
 
     // 更新関数内で _reconcile が呼ばれていること
-    // _reconcile(container, items, template)
-    expect(output).toContain('_reconcile(_e0, _a, _tmpl_tmpl_list_id);')
+    // _reconcile(container, items, template, slotFns)
+    expect(output).toContain('_reconcile(_e0, _a, _tmpl_tmpl_list_id, []);')
 
     // innerHTML への直接代入が含まれていないこと
     expect(output).not.toContain('.innerHTML =')
@@ -137,7 +139,7 @@ describe('Code Generator: Forコンポーネントの詳細テスト', () => {
     const output = generateAppJs(ctx)
 
     // 配列が空でも _reconcile が呼ばれること
-    expect(output).toContain('_reconcile(_e0, _a, _tmpl_tmpl_empty);')
+    expect(output).toContain('_reconcile(_e0, _a, _tmpl_tmpl_empty, []);')
     // items.forEach が _reconcile 内で使われていること
     expect(output).toContain('items.forEach')
   })
@@ -165,7 +167,8 @@ describe('Code Generator: Forコンポーネントの詳細テスト', () => {
     )
 
     // q-text の置換処理が _reconcile 内にあること
-    expect(output).toContain("clone.querySelector('q-text')")
+    expect(output).toContain("clone.querySelectorAll('q-text')")
+    expect(output).toContain('node._q_texts')
     expect(output).toContain('slot.parentNode.replaceChild(textNode, slot)')
   })
 
@@ -209,8 +212,8 @@ describe('Code Generator: Forコンポーネントの詳細テスト', () => {
 
     const output = generateAppJs(ctx)
 
-    // 既存ノードの更新ロジック (_q_text でキャッシュされたテキストノードを更新)
-    expect(output).toContain('node._q_text')
-    expect(output).toContain('node._q_text.textContent')
+    // 既存ノードの更新ロジック (_q_texts でキャッシュされたテキストノードを更新)
+    expect(output).toContain('node._q_texts')
+    expect(output).toContain('tn.textContent !== val')
   })
 })

@@ -38,6 +38,7 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
   // 2. テンプレートの生成 (1回だけ実行)
   let templateHtml = ''
   const itemRenderer = children[0]
+  const itemSlots: string[] = []
 
   if (typeof itemRenderer === 'function') {
     const SLOT_MARKER = '<!--Q_SLOT-->'
@@ -45,20 +46,29 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
 
     // ダミーのシグナルを渡して1回レンダリングし、構造を取得する
     // item() が呼ばれた箇所がSLOT_MARKERになる
-    const vnode = itemRenderer(() => SLOT_MARKER) as VNode
+    // h.ts 側で for-item- から始まるIDを検知して特別に扱う
+    const itemSignalId = `for-item-${qid}`
+    const spyItem = () => {
+      tracker.report(itemSignalId)
+      return SLOT_MARKER
+    }
+    const vnode = itemRenderer(spyItem) as VNode
 
     if (vnode && typeof vnode === 'object' && 'html' in vnode) {
       if (vnode.additionalNodes) additionalNodes.push(...vnode.additionalNodes)
 
-      // SLOT_MARKER を <q-text> に置換
-      // SLOT_MARKER が含まれている場合は置換し、そうでなければそのまま使う
+      // 子要素の命令から itemFns を持つものを集める (スロット順)
+      const itemInstructions = vnode.instructions.filter(i => i.itemFns)
+      for (const inst of itemInstructions) {
+        // biome-ignore lint/style/noNonNullAssertion: filtered
+        itemSlots.push(...inst.itemFns!)
+      }
+
+      // SLOT_MARKER を <q-text> にすべて置換
       if (vnode.html.includes(SLOT_MARKER)) {
-        templateHtml = vnode.html.replace(SLOT_MARKER, SLOT_REPLACEMENT)
+        templateHtml = vnode.html.replaceAll(SLOT_MARKER, SLOT_REPLACEMENT)
       } else {
-        // SLOT_MARKER が含まれていない場合（関数呼び出しの結果がテキストノードになっていない）
-        // 要素のtextContent全体を置き換える想定で <q-text> を挿入
-        // 最も内側のテキストを持つ要素に <q-text> を入れる
-        // 簡易的な実装: 末尾の > を置き換えてq-textを入れる
+        // ... (省略)
         const match = vnode.html.match(/^(<[^>]+>)(.*)(<\/[^>]+>)$/)
         if (match) {
           templateHtml = `${match[1]}${SLOT_REPLACEMENT}${match[3]}`
@@ -66,22 +76,12 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
           templateHtml = `<span>${SLOT_REPLACEMENT}</span>`
         }
       }
-    } else if (typeof vnode === 'string') {
-      // 単純なテキストの場合
-      templateHtml = `<span>${SLOT_REPLACEMENT}</span>`
-    } else {
-      // フォールバック
-      templateHtml = `<span>${SLOT_REPLACEMENT}</span>`
     }
   }
 
-  // 3. each関数をhiddenDerivedとして登録
-  // これにより、each関数がderivedとして扱われる
+  // 3. each関数をhiddenDerivedとして登録 (変更なし)
   if (deps.size > 0) {
-    // each関数の戻り値を返すexpression
-    // deps[0]を使って配列を生成する関数を登録
     const eachFnStr = props.each.toString()
-
     hiddenDerivedRequests.push({
       placeholderId: listDerivedId,
       deps: Array.from(deps),
@@ -91,7 +91,6 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
   }
 
   // 4. 命令の登録
-  // signalId として配列を生成するderivedのIDを使う
   const signalId = deps.size > 0 ? listDerivedId : undefined
   if (signalId) {
     instructions.push({
@@ -101,6 +100,7 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
       template: templateHtml,
       templateId,
       listFn: props.each.toString(),
+      itemSlots: itemSlots.length > 0 ? itemSlots : undefined,
     })
   }
 

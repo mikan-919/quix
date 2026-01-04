@@ -97,8 +97,11 @@ export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
         () => fn()
       )
 
+      // 1. Forアイテム依存のチェック
+      const isItemDep = Array.from(deps).some(id => id.startsWith('for-item-'))
+
       // 依存している変数が 1 つだけなら、直接その ID を使う (Shortcut!)
-      if (deps.size === 1) {
+      if (deps.size === 1 && !isItemDep) {
         // biome-ignore lint/style/noNonNullAssertion: checked
         const signalId = Array.from(deps)[0]!
         instructions.push({ signalId, selector: `.${qid}`, action: 'setText' })
@@ -111,7 +114,7 @@ export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
         logger.debug(
           `Optimization: Extracting complex interpolation for <${tag}>`
         )
-        // 依存が複数、または 0 の場合は従来通りの処理
+        // 依存が複数、または 0、または Forアイテム依存の場合は従来通りの処理
         setupComplexTextInterpolation(
           qid,
           flatChildren,
@@ -190,18 +193,30 @@ function setupComplexTextInterpolation(
   const tmplId = generateId('hd')
   const deps = new Set<string>()
   const initialHtmlParts: string[] = []
+  const itemFns: string[] = []
+  const SLOT_MARKER = '<!--Q_SLOT-->'
 
   const templateParts = flatChildren.map(child => {
     if (typeof child === 'function') {
-      return tracker.runWithScope(
+      const localDeps = new Set<string>()
+      const val = tracker.runWithScope(
         tmplId,
-        id => deps.add(id),
-        () => {
-          const val = child()
-          initialHtmlParts.push(String(val))
-          return `\${val}`
-        }
+        id => {
+          deps.add(id)
+          localDeps.add(id)
+        },
+        () => (child as () => unknown)()
       )
+
+      if (Array.from(localDeps).some(id => id.startsWith('for-item-'))) {
+        itemFns.push(child.toString())
+        initialHtmlParts.push(SLOT_MARKER)
+      } else {
+        initialHtmlParts.push(String(val))
+      }
+
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: code generation
+      return `\${val}`
     }
     const str = String(child)
     initialHtmlParts.push(str)
@@ -213,10 +228,14 @@ function setupComplexTextInterpolation(
     deps: Array.from(deps),
     templateBody: templateParts.join(''),
   })
+
+  const isForDep = Array.from(deps).some(id => id.startsWith('for-item-'))
+
   instructions.push({
     signalId: tmplId,
     selector: `.${qid}`,
     action: 'setText',
+    itemFns: isForDep ? itemFns : undefined,
   })
   processedHtml.push(initialHtmlParts.join(''))
 }

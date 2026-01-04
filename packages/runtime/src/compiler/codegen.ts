@@ -15,15 +15,15 @@ const generate = (_generate as any).default || _generate
 function transformCode(
   code: string,
   context: ComponentContext,
-  idToShort: Map<string, string>
+  idToShort: Map<string, string>,
+  keepParams = false
 ): string {
-  // ... (省略)
   try {
     const ast = parse(code, {
       sourceType: 'module',
       plugins: ['typescript', 'jsx'],
-    })
-    // ... (既存のロジック)
+    }) as any
+
     let scopeName = 'state'
     const body = ast.program.body[0]
     if (
@@ -37,13 +37,28 @@ function transformCode(
         if (t.isIdentifier(firstParam)) {
           scopeName = firstParam.name
         }
-        fn.params = fn.params.slice(1)
+        if (!keepParams) {
+          fn.params = fn.params.slice(1)
+        }
       }
     }
+
     traverse(ast, {
       // biome-ignore lint/suspicious/noExplicitAny: babel types
       CallExpression(innerPath: any) {
         const callee = innerPath.node.callee
+
+        // 1. 直出しの呼び出し: item() -> item
+        if (
+          t.isIdentifier(callee) &&
+          callee.name === scopeName &&
+          scopeName === 'item'
+        ) {
+          innerPath.replaceWith(t.identifier(scopeName))
+          return
+        }
+
+        // 2. メンバー経由の呼び出し: state.count() -> _a
         if (
           t.isMemberExpression(callee) &&
           t.isIdentifier(callee.object) &&
@@ -82,6 +97,7 @@ function transformCode(
         }
       },
     })
+
     return generate(ast, {
       minified: true,
       comments: false,
@@ -300,11 +316,19 @@ export function generateAppJs(context: ComponentContext) {
           }
           if (i.action === 'list' && i.templateId) {
             const tId = i.templateId.replace(/-/g, '_')
-            // listFnがある場合は、derivedノードとして登録されているはず
-            // そのderivedの値（配列）を使う
+            // itemSlots の変換
+            let slotFnsStr = '[]'
+            if (i.itemSlots && i.itemSlots.length > 0) {
+              const transformedSlots = i.itemSlots.map(fnStr => {
+                const withParam = fnStr.replace(/^\(\)\s*=>/, '(item) =>')
+                return transformCode(withParam, context, idToShort, true)
+              })
+              slotFnsStr = `[${transformedSlots.join(', ')}]`
+            }
+
             return `    if(_e${elIdx}) _reconcile(_e${elIdx}, ${getRef(
               node.id
-            )}, _tmpl_${tId});`
+            )}, _tmpl_${tId}, ${slotFnsStr});`
           }
           return ''
         })
@@ -362,33 +386,33 @@ export function generateAppJs(context: ComponentContext) {
   const root = document.getElementById("app");
   if (!root) return;
 
-  function _reconcile(container, items, template) {
+  function _reconcile(container, items, template, slotFns) {
     let oldMap = container._q_map || new Map();
     let newMap = new Map();
+    const hasSlotFns = slotFns && slotFns.length > 0;
     
     // 1. Prepare nodes
     items.forEach(item => {
-       // Simple key strategy: use item if primitive, or item.key if exists, or item itself
        const key = (typeof item === 'object' && item !== null && 'key' in item) ? item.key : item;
        let node = oldMap.get(key);
        if (!node) {
          const clone = template.content.cloneNode(true);
-         const slot = clone.querySelector('q-text');
-         if (slot) {
-            const textNode = document.createTextNode(String(item));
+         const slots = clone.querySelectorAll('q-text');
+         const q_texts = [];
+         slots.forEach((slot, i) => {
+            const val = (hasSlotFns && slotFns[i]) ? slotFns[i](item) : String(item);
+            const textNode = document.createTextNode(val);
             slot.parentNode.replaceChild(textNode, slot);
-            // We assume the first child of the template is the item node
-            // But clone implies DocumentFragment. 
-            // clone.firstElementChild is the element.
-            if (clone.firstElementChild) {
-               clone.firstElementChild._q_text = textNode;
-            }
-         }
+            q_texts.push(textNode);
+         });
          node = clone.firstElementChild;
+         if (node) node._q_texts = q_texts;
        } else {
-         // Update text content if changed (and if we have a handle)
-         if (node._q_text && node._q_text.textContent !== String(item)) {
-            node._q_text.textContent = String(item);
+         if (node._q_texts) {
+            node._q_texts.forEach((tn, i) => {
+              const val = String((hasSlotFns && slotFns[i]) ? slotFns[i](item) : item);
+              if (tn.textContent !== val) tn.textContent = val;
+            });
          }
        }
        if (node) newMap.set(key, node);
@@ -396,15 +420,9 @@ export function generateAppJs(context: ComponentContext) {
     
     // 2. Align DOM
     let cursor = container.firstElementChild;
-    // The instruction selector points to the span anchor.
-    // We treat the span as the container for the list items.
-    
-    cursor = container.firstElementChild; 
-    
     items.forEach(item => {
        const key = (typeof item === 'object' && item !== null && 'key' in item) ? item.key : item;
        const node = newMap.get(key);
-       
        if (node) {
          if (node !== cursor) {
             container.insertBefore(node, cursor);
