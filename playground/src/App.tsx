@@ -1,4 +1,4 @@
-import { component, For, type QuixComponent, Show } from '@quix/runtime'
+import { component, For, type QuixComponent } from '@quix/runtime'
 import z from 'zod'
 
 const Display = component('Display')
@@ -6,7 +6,7 @@ const Display = component('Display')
   .render(({ props }) => <h2>Double: {props.value()}</h2>)
 
 const App: QuixComponent = component('App')
-  .state('count', 1)
+  .state('count', 10)
   .derived('double', ['count'], s => s.count() * 2)
   .handler('inc', ['count'], s => s.count(s.count() + 1))
   .render(({ state, handlers }) => (
@@ -16,12 +16,7 @@ const App: QuixComponent = component('App')
         Count is: {state.count()}
       </button>
       <For each={Array.from({ length: state.count() }, (_, i) => i)}>
-        {item => (
-          <p>
-            AA{item()}
-            {'#'.repeat(item())}
-          </p>
-        )}
+        {item => <Display value={item()} />}
       </For>
       <Display value={state.double()} />
     </div>

@@ -6,6 +6,8 @@ export interface NodeBase {
   id: string
   key: string
   type: NodeType
+  // biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency with ComponentContext
+  context?: any
 }
 
 export interface StateNode extends NodeBase {
@@ -50,6 +52,9 @@ export interface Instruction {
   listFn?: string // For用: each関数の文字列表現
   itemSlots?: string[] // For用: 各q-textスロットを更新するための関数の配列表現
   itemFns?: string[] // For用: テキストノード内の各動的分を更新するための関数の文字列表現リスト
+  itemInstructions?: Instruction[] // For用: 各アイテム内で実行される命令
+  // biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency
+  context?: any
 }
 
 export interface HiddenDerivedRequest {

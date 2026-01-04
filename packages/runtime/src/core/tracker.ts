@@ -8,6 +8,19 @@ interface Scope {
 class Tracker {
   private stack: Scope[] = []
   private isPaused = false
+  private probingCount = 0
+
+  startProbing() {
+    this.probingCount++
+  }
+
+  stopProbing() {
+    this.probingCount--
+  }
+
+  isProbing() {
+    return this.probingCount > 0
+  }
 
   /**
    * 依存関係の収集を開始します

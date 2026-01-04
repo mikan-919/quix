@@ -80,7 +80,7 @@ describe('Code Generator: 基本的なコード生成', () => {
 
     // _reconcile 関数の定義が含まれていること
     expect(output).toContain(
-      'function _reconcile(container, items, template, slotFns)'
+      'function _reconcile(container, items, template, slotFns, itemUpdateFn)'
     )
 
     // テンプレートの宣言
@@ -89,8 +89,10 @@ describe('Code Generator: 基本的なコード生成', () => {
     )
 
     // 更新関数内で _reconcile が呼ばれていること
-    // _reconcile(container, items, template, slotFns)
-    expect(output).toContain('_reconcile(_e0, _a, _tmpl_tmpl_list_id, []);')
+    // _reconcile(container, items, template, slotFns, itemUpdateFn)
+    expect(output).toContain(
+      '_reconcile(_e0, _a, _tmpl_tmpl_list_id, [], null);'
+    )
 
     // innerHTML への直接代入が含まれていないこと
     expect(output).not.toContain('.innerHTML =')
@@ -139,7 +141,7 @@ describe('Code Generator: Forコンポーネントの詳細テスト', () => {
     const output = generateAppJs(ctx)
 
     // 配列が空でも _reconcile が呼ばれること
-    expect(output).toContain('_reconcile(_e0, _a, _tmpl_tmpl_empty, []);')
+    expect(output).toContain('_reconcile(_e0, _a, _tmpl_tmpl_empty, [], null);')
     // items.forEach が _reconcile 内で使われていること
     expect(output).toContain('items.forEach')
   })
