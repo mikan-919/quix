@@ -1,4 +1,4 @@
-import { generateId } from '../id'
+import { generateId, getActiveContext } from '../id'
 import { tracker } from '../tracker'
 import type {
   ComponentNode,
@@ -40,7 +40,7 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
   const itemRenderer = children[0]
 
   if (typeof itemRenderer === 'function') {
-    const SLOT_MARKER = '<!--Q_SLOT-->'
+    const SLOT_MARKER = '<q-text></q-text>'
     const SLOT_REPLACEMENT = '<q-text></q-text>'
 
     // ダミーのシグナルを渡して1回レンダリングし、構造を取得する
@@ -107,6 +107,7 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
             nestedItemInstructions.length > 0
               ? nestedItemInstructions
               : undefined,
+          context: getActiveContext(),
         })
       }
     }

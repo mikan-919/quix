@@ -3,7 +3,7 @@ import { ComponentBuilder } from './core/builder'
 import { handleComponent } from './core/components/Component'
 import { handleFor } from './core/components/For'
 import { handleShow } from './core/components/Show'
-import { generateId } from './core/id'
+import { generateId, getActiveContext } from './core/id'
 import { For, Show } from './core/symbols'
 import { tracker } from './core/tracker'
 import type {
@@ -44,6 +44,7 @@ export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
           selector: `.${qid}`,
           action: 'addListener',
           attrName: k.toLowerCase().replace(/^on/, ''),
+          context: getActiveContext(),
         })
         needsQid = true
         logger.trace(`  Bind Handler: ${k} -> ${handlerId}`)
@@ -66,6 +67,7 @@ export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
             selector: `.${qid}`,
             action: 'setAttr',
             attrName: k,
+            context: getActiveContext(),
           })
           needsQid = true
           logger.trace(`  Bind Reactive Prop: ${k} -> ${signalId}`)
@@ -104,7 +106,12 @@ export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
       if (deps.size === 1 && !isItemDep) {
         // biome-ignore lint/style/noNonNullAssertion: checked
         const signalId = Array.from(deps)[0]!
-        instructions.push({ signalId, selector: `.${qid}`, action: 'setText' })
+        instructions.push({
+          signalId,
+          selector: `.${qid}`,
+          action: 'setText',
+          context: getActiveContext(),
+        })
         processedHtml.push(String(val))
         // hiddenDerivedRequests への追加は不要（中間ノードをスキップ）
         logger.debug(
@@ -194,7 +201,7 @@ function setupComplexTextInterpolation(
   const deps = new Set<string>()
   const initialHtmlParts: string[] = []
   const itemFns: string[] = []
-  const SLOT_MARKER = '<!--Q_SLOT-->'
+  const SLOT_MARKER = '<q-text></q-text>'
 
   const templateParts = flatChildren.map(child => {
     if (typeof child === 'function') {
@@ -236,6 +243,7 @@ function setupComplexTextInterpolation(
     selector: `.${qid}`,
     action: 'setText',
     itemFns: isForDep ? itemFns : undefined,
+    context: getActiveContext(),
   })
   processedHtml.push(initialHtmlParts.join(''))
 }

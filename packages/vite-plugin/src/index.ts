@@ -87,7 +87,15 @@ export function quixPlugin(): Plugin {
       // これにより `ssrLoadModule` で読み込まれた際の挙動を制御します。
       if (id.includes('?quix-analyze')) {
         const cleanId = id.replace(/\?quix-analyze$/, '')
-        return { code: transformQuix(code, cleanId), map: null }
+        logger.debug(`Transforming for analyze: ${cleanId}`)
+        try {
+          const transformed = transformQuix(code, cleanId)
+          logger.trace(`Transformed code start: ${transformed.slice(0, 100)}`)
+          return { code: transformed, map: null }
+        } catch (e) {
+          logger.error(`Transform failed for ${cleanId}:`, e)
+          throw e
+        }
       }
 
       // .tsx ファイルに対するメイン処理

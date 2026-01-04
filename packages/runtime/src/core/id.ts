@@ -25,3 +25,15 @@ export function generateId(prefix = 'q') {
 export function resetIdGenerator(name: string) {
   stack = [{ name: name.replace(/[^a-zA-Z0-9-_]/g, ''), counter: 0 }]
 }
+
+// biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency
+let activeContext: any = null
+
+// biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency
+export function setActiveContext(ctx: any) {
+  activeContext = ctx
+}
+
+export function getActiveContext() {
+  return activeContext
+}

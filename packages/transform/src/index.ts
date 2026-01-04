@@ -9,13 +9,18 @@ const pluginPath = path.resolve(
   '../swc-plugin/target/wasm32-wasip1/release/swc_lazy_jsx_plugin.wasm'
 )
 export function transformQuix(code: string, _filename: string) {
-  const result = transformSync(code, {
-    jsc: {
-      target: 'es2020',
-      parser: { syntax: 'typescript', tsx: true },
-      experimental: { plugins: [[pluginPath, {}]] },
-    },
-    minify: false,
-  })
-  return result.code
+  try {
+    const result = transformSync(code, {
+      jsc: {
+        target: 'es2020',
+        parser: { syntax: 'typescript', tsx: true },
+        experimental: { plugins: [[pluginPath, {}]] },
+      },
+      minify: false,
+    })
+    return result.code
+  } catch (e) {
+    console.error(`SWC Transform failed for ${_filename}:`, e)
+    throw e
+  }
 }

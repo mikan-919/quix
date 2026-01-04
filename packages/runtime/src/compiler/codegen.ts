@@ -24,7 +24,11 @@ function transformCode(
       plugins: ['typescript', 'jsx'],
     }) as any
 
-    let scopeName = 'state'
+    let stateScope = 'state'
+    let propsScope = 'props'
+    let handlersScope = 'handlers'
+    let itemScope = 'item'
+
     const body = ast.program.body[0]
     if (
       t.isExpressionStatement(body) &&
@@ -35,7 +39,19 @@ function transformCode(
       if (fn.params.length > 0) {
         const firstParam = fn.params[0]
         if (t.isIdentifier(firstParam)) {
-          scopeName = firstParam.name
+          stateScope = firstParam.name
+        } else if (t.isObjectPattern(firstParam)) {
+          for (const prop of firstParam.properties) {
+            if (
+              t.isObjectProperty(prop) &&
+              t.isIdentifier(prop.key) &&
+              t.isIdentifier(prop.value)
+            ) {
+              if (prop.key.name === 'state') stateScope = prop.value.name
+              if (prop.key.name === 'props') propsScope = prop.value.name
+              if (prop.key.name === 'handlers') handlersScope = prop.value.name
+            }
+          }
         }
         if (!keepParams) {
           fn.params = fn.params.slice(1)
@@ -49,50 +65,80 @@ function transformCode(
         const callee = innerPath.node.callee
 
         // 1. 直出しの呼び出し: item() -> item
-        if (
-          t.isIdentifier(callee) &&
-          callee.name === scopeName &&
-          scopeName === 'item'
-        ) {
-          innerPath.replaceWith(t.identifier(scopeName))
+        if (t.isIdentifier(callee) && callee.name === itemScope) {
+          innerPath.replaceWith(t.identifier(itemScope))
           return
         }
 
-        // 2. メンバー経由の呼び出し: state.count() -> _a
+        // 2. メンバー経由の呼び出し: state.count() -> _a, props.v() -> item or _a, etc.
         if (
           t.isMemberExpression(callee) &&
           t.isIdentifier(callee.object) &&
-          callee.object.name === scopeName &&
           t.isIdentifier(callee.property)
         ) {
+          const objName = callee.object.name
           const key = callee.property.name
-          const targetNode = context.getNodeByKey(key)
-          if (!targetNode) return
 
-          const shortName = idToShort.get(targetNode.id)
-          if (!shortName) return
+          if (objName === stateScope || objName === propsScope) {
+            let targetId: string | undefined
+            let isDerived = false
 
-          const args = innerPath.node.arguments
-          if (args.length === 0) {
-            innerPath.replaceWith(
-              targetNode.type === 'derived'
-                ? t.callExpression(t.identifier(shortName), [])
-                : t.identifier(shortName)
-            )
-          } else if (args.length === 1 && targetNode.type === 'state') {
-            const assignment = t.assignmentExpression(
-              '=',
-              t.identifier(shortName),
-              // biome-ignore lint/suspicious/noExplicitAny: ast node
-              args[0] as any
-            )
-            const updateCall = t.callExpression(
-              t.identifier(`_u${shortName}`),
-              []
-            )
-            innerPath.replaceWith(
-              t.sequenceExpression([assignment, updateCall])
-            )
+            if (objName === stateScope) {
+              const node = context.getNodeByKey(key)
+              if (node) {
+                targetId = node.id
+                isDerived = node.type === 'derived'
+              }
+            } else {
+              targetId = context.propMap.get(key)
+              // Prop の先が Derived かどうかは Context 跨ぎになるため、
+              // signals map から判定する必要があるが、ここでは signalId の形式で推測
+              isDerived = !!targetId?.match(/^d-/)
+            }
+
+            if (!targetId) return
+
+            if (targetId.startsWith('for-item-')) {
+              innerPath.replaceWith(t.identifier(itemScope))
+              return
+            }
+
+            const shortName = idToShort.get(targetId)
+            if (!shortName) return
+
+            const args = innerPath.node.arguments
+            if (args.length === 0) {
+              innerPath.replaceWith(
+                isDerived
+                  ? t.callExpression(t.identifier(shortName), [])
+                  : t.identifier(shortName)
+              )
+            } else if (
+              args.length === 1 &&
+              objName === stateScope &&
+              context.getNodeById(targetId)?.type === 'state'
+            ) {
+              const assignment = t.assignmentExpression(
+                '=',
+                t.identifier(shortName),
+                // biome-ignore lint/suspicious/noExplicitAny: ast node
+                args[0] as any
+              )
+              const updateCall = t.callExpression(
+                t.identifier(`_u${shortName}`),
+                []
+              )
+              innerPath.replaceWith(
+                t.sequenceExpression([assignment, updateCall])
+              )
+            }
+          } else if (objName === handlersScope) {
+            const targetNode = context.getNodeByKey(key)
+            if (targetNode) {
+              innerPath.replaceWith(
+                t.identifier(`{{HANDLER:${targetNode.id}}}`)
+              )
+            }
           }
         }
       },
@@ -230,7 +276,11 @@ export function generateAppJs(context: ComponentContext) {
         fnStr = node.fn.toString()
       }
       if (!node.templateBody || node.isExpression) {
-        const transformed = transformCode(fnStr, context, idToShort)
+        const transformed = transformCode(
+          fnStr,
+          node.context || context,
+          idToShort
+        )
         return `  const ${name} = ${transformed};`
       }
       return `  const ${name} = ${fnStr};`
@@ -337,12 +387,10 @@ export function generateAppJs(context: ComponentContext) {
               const body = i.itemInstructions
                 .map(ii => {
                   const selector = ii.selector.replace(/^\./, '')
+                  const findEl = `{ const el = root.classList.contains('${selector}') ? root : root.querySelector('.${selector}'); if(el)`
                   if (ii.action === 'setText') {
-                    if (ii.itemFns) {
-                      // complex interpolation helper (handled by reconcile's slotFns logic for now)
-                      return ''
-                    }
-                    return `      { const el = root.querySelector('.${selector}'); if(el) el.textContent = String(item); }`
+                    if (ii.itemFns) return ''
+                    return `      ${findEl} el.textContent = String(item); }`
                   }
                   if (ii.action === 'setAttr' && ii.attrName) {
                     const attr = ii.attrName
@@ -351,16 +399,21 @@ export function generateAppJs(context: ComponentContext) {
                       attr === 'checked' ||
                       attr === 'disabled'
                     ) {
-                      return `      { const el = root.querySelector('.${selector}'); if(el) el.${attr} = item; }`
+                      return `      ${findEl} el.${attr} = item; }`
                     }
-                    return `      { const el = root.querySelector('.${selector}'); if(el) el.setAttribute('${attr}', item); }`
+                    return `      ${findEl} el.setAttribute('${attr}', item); }`
                   }
                   if (ii.action === 'addListener' && ii.attrName) {
                     const handlerNode = context.getNodeById(ii.signalId)
                     if (handlerNode && handlerNode.type === 'handler') {
                       let hBody = handlerNode.fn.toString()
-                      hBody = transformCode(hBody, context, idToShort, true)
-                      return `      { const el = root.querySelector('.${selector}'); if(el) el.addEventListener('${ii.attrName}', ${hBody}); }`
+                      hBody = transformCode(
+                        hBody,
+                        handlerNode.context || context,
+                        idToShort,
+                        true
+                      )
+                      return `      ${findEl} el.addEventListener('${ii.attrName}', ${hBody}); }`
                     }
                   }
                   return ''
@@ -376,10 +429,19 @@ export function generateAppJs(context: ComponentContext) {
               .filter(ii => ii.itemFns)
               .flatMap(ii => ii.itemFns!)
             if (allItemFns.length > 0) {
-              const transformedSlots = allItemFns.map(fnStr => {
-                const withParam = fnStr.replace(/^\(\)\s*=>/, '(item) =>')
-                return transformCode(withParam, context, idToShort, true)
-              })
+              const transformedSlots = (i.itemInstructions || [])
+                .filter(ii => ii.itemFns)
+                .flatMap(ii => {
+                  return ii.itemFns!.map(fnStr => {
+                    const withParam = fnStr.replace(/^\(\)\s*=>/, '(item) =>')
+                    return transformCode(
+                      withParam,
+                      ii.context || context,
+                      idToShort,
+                      true
+                    )
+                  })
+                })
               slotFnsStr = `[${transformedSlots.join(', ')}]`
             }
 

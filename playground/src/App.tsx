@@ -16,11 +16,7 @@ const App: QuixComponent = component('App')
         Count is: {state.count()}
       </button>
       <For each={Array.from({ length: state.count() }, (_, i) => i)}>
-        {item => (
-          <p>
-            <Display value={item()} />
-          </p>
-        )}
+        {item => <Display value={item()} />}
       </For>
       <Display value={state.double()} />
     </div>

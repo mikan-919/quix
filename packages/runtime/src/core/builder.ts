@@ -1,7 +1,13 @@
 import consola from 'consola'
 import { z } from 'zod'
 import { ComponentContext } from './context'
-import { getNextInstanceId, popIdContext, pushIdContext } from './id'
+import {
+  getActiveContext,
+  getNextInstanceId,
+  popIdContext,
+  pushIdContext,
+  setActiveContext,
+} from './id'
 import { tracker } from './tracker'
 import type {
   ComponentNode,
@@ -37,6 +43,7 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
   }> = []
   // biome-ignore lint/suspicious/noExplicitAny: generic render
   private renderFn?: (args: any) => VNode
+  private _analysisContext?: ComponentContext
 
   constructor(public name: string) {
     logger.debug(`Define Component: ${name}`)
@@ -103,58 +110,75 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
       `[${this.name}] +Handler: ${key} (deps: ${depKeys.join(', ')})`
     )
     this.handlers.push({ key, depKeys: depKeys as string[], fn })
-    return this as unknown as ComponentBuilder<
-      P,
-      S,
-      D,
-      Simplify<H & Record<K, F>>
-    >
+    return this as unknown as ComponentBuilder<P, S, D, H & Record<K, F>>
   }
 
   render(
     fn: (args: {
-      state: ToReader<Simplify<S & D>>
-      handlers: H
+      state: ToSignal<S>
       props: ToPropsSignal<P>
+      handlers: H
     }) => VNode
-  ): QuixComponent<P> {
+  ) {
     this.renderFn = fn
-    // ルート解析
-    const context = this.buildInstance({}, true)
-    // @ts-expect-error
-    context.__quix_builder = this
-    return context as QuixComponent<P>
+    // 解析用のインスタンスを先行して作成しておく
+    this._analysisContext = this.buildInstance({}, true)
+    return this as unknown as QuixComponent<P>
   }
 
+  // SSR/Analysis 用にルートインスタンスを提供（互換性と解析のため）
+  get context(): ComponentContext {
+    if (!this._analysisContext) {
+      this._analysisContext = this.buildInstance({}, true)
+    }
+    return this._analysisContext
+  }
+
+  get instructions() {
+    return this.context.instructions
+  }
+  get html() {
+    return this.context.html
+  }
+  getNodeByKey(key: string) {
+    return this.context.getNodeByKey(key)
+  }
+  getNodeById(id: string) {
+    return this.context.getNodeById(id)
+  }
+  getAllNodes() {
+    return this.context.getAllNodes()
+  }
+
+  /**
+   * コンポーネントのインスタンスを生成して初期HTMLと命令セットを返す (SSR用)
+   */
   buildInstance(
     inputProps: Record<string, unknown>,
     isRoot = false
   ): ComponentContext {
-    const phase = isRoot ? 'Root Analysis' : 'Child Analysis'
-    logger.info(`Build Instance: <${this.name} /> (${phase})`)
-    // 1. Zod バリデーション用のアンラップ
-    const peekProps: Record<string, unknown> = {}
+    const instanceId = isRoot ? '' : getNextInstanceId(this.name)
+    const context = new ComponentContext(this.name, instanceId)
+    pushIdContext(this.name)
+
+    // 1. Props の準備
+    const peekProps = {} as Record<string, unknown>
     for (const key of Object.keys(inputProps)) {
       const val = inputProps[key]
-      // バリデーションのために一時的に実行。trackerを黙らせて副作用を防ぐ
       peekProps[key] =
         typeof val === 'function' ? tracker.silence(() => val()) : val
     }
 
     // バリデーション実行（Root時やProbing時はスキップ）
+    const isProbing = tracker.isProbing()
     const validatedProps =
-      this.schema && !isRoot && !tracker.isProbing()
+      this.schema && !isRoot && !isProbing
         ? this.schema.parse(peekProps)
         : peekProps
     // バリデーション成功ログ
     if (this.schema && !isRoot) {
       logger.debug(`[${this.name}] Props validated successfully.`)
     }
-
-    // 2. ID コンテキスト管理
-    pushIdContext(this.name)
-    const instanceId = isRoot ? '' : getNextInstanceId(this.name)
-    const context = new ComponentContext(this.name, instanceId)
 
     // 3. Props Proxy (実行時に親のシグナルを叩く)
     const propsProxy = new Proxy(
@@ -166,6 +190,25 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
         },
       }
     ) as ToPropsSignal<P>
+
+    // ⭐️ 修正: Props のシグナル紐付けを記録 (Codegen用)
+    if (!isRoot) {
+      for (const key of Object.keys(inputProps)) {
+        const val = inputProps[key]
+        if (typeof val === 'function') {
+          const deps = new Set<string>()
+          tracker.runWithScope(
+            `prop-probe-${key}`,
+            id => deps.add(id),
+            // biome-ignore lint/suspicious/noExplicitAny: generic proxy
+            () => (propsProxy as any)[key]()
+          )
+          if (deps.size === 1) {
+            context.propMap.set(key, Array.from(deps)[0]!)
+          }
+        }
+      }
+    }
 
     // 4. ノードの先行登録（依存解決のために先にMapを埋める）
     for (const { key, valueOrFn } of this.states) {
@@ -179,30 +222,37 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
         .map(k => context.getNodeByKey(k)?.id)
         .filter((id): id is string => !!id)
       const id = context.addDerived(key, fn, depIds)
-      logger.trace(`  -> Register Derived: ${key} (${id})`)
+      logger.trace(
+        `  -> Register Derived: ${key} (${id}, deps: ${depIds.join(', ')})`
+      )
     }
     for (const { key, depKeys, fn } of this.handlers) {
       const depIds = depKeys
         .map(k => context.getNodeByKey(k)?.id)
         .filter((id): id is string => !!id)
       const id = context.addHandler(key, fn, depIds)
-      logger.trace(`  -> Register Handler: ${key} (${id})`)
+      logger.trace(
+        `  -> Register Handler: ${key} (${id}, deps: ${depIds.join(', ')})`
+      )
     }
 
-    // 5. 統合 Proxy (State + Props)
-    const createScopeProxy = () => {
+    // 5. Proxy ユーティリティ
+    const createScopeProxy = (isReader = false) => {
       return new Proxy(
         {},
         {
           get: (_, key: string) => {
-            if (key === 'props') return propsProxy
             const node = context.getNodeByKey(key)
             if (!node) return undefined
+
+            // SSR解析時(isReader=false)も値を取得・実行できるように関数を返す
+            // これにより、render関数内の state.count() が動作し、h() が依存関係(node.id)を収集できる
             return () => {
-              tracker.report(node.id)
-              return tracker.silence(() =>
-                this.computeValue(context, node, propsProxy)
-              )
+              if (!isReader) tracker.report(node.id)
+              if (node.type === 'state') return (node as any).value
+              if (node.type === 'derived')
+                return this.computeValue(context, node, peekProps)
+              return undefined
             }
           },
         }
@@ -223,32 +273,38 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
         }
       )
 
-      const vnode = this.renderFn({
-        // biome-ignore lint/suspicious/noExplicitAny: proxy casting
-        state: scope as any,
-        // biome-ignore lint/suspicious/noExplicitAny: proxy casting
-        handlers: handlersProxy as any,
-        props: propsProxy,
-      })
+      const prevActive = getActiveContext()
+      setActiveContext(context)
+      try {
+        const vnode = this.renderFn({
+          // biome-ignore lint/suspicious/noExplicitAny: proxy casting
+          state: scope as any,
+          // biome-ignore lint/suspicious/noExplicitAny: proxy casting
+          handlers: handlersProxy as any,
+          props: propsProxy,
+        })
 
-      context.html = vnode.html
-      context.instructions = vnode.instructions
-      if (vnode.additionalNodes) {
-        for (const n of vnode.additionalNodes) context.nodes.set(n.id, n)
-      }
-      if (vnode.hiddenDerivedRequests) {
-        for (const req of vnode.hiddenDerivedRequests) {
-          context.addHiddenDerived(
-            req.deps,
-            req.templateBody,
-            req.isExpression,
-            req.placeholderId
-          )
+        context.html = vnode.html
+        context.instructions = vnode.instructions
+        if (vnode.additionalNodes) {
+          for (const n of vnode.additionalNodes) context.nodes.set(n.id, n)
         }
+        if (vnode.hiddenDerivedRequests) {
+          for (const req of vnode.hiddenDerivedRequests) {
+            context.addHiddenDerived(
+              req.deps,
+              req.templateBody,
+              req.isExpression,
+              req.placeholderId
+            )
+          }
+        }
+        logger.debug(
+          `[${this.name}] Render complete. Generated ${vnode.instructions.length} instructions.`
+        )
+      } finally {
+        setActiveContext(prevActive)
       }
-      logger.debug(
-        `[${this.name}] Render complete. Generated ${vnode.instructions.length} instructions.`
-      )
     }
 
     popIdContext()
