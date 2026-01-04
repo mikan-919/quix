@@ -27,7 +27,7 @@ function transformCode(
     let stateScope = 'state'
     let propsScope = 'props'
     let handlersScope = 'handlers'
-    let itemScope = 'item'
+    const itemScope = 'item'
 
     const body = ast.program.body[0]
     if (
