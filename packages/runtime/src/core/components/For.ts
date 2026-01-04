@@ -1,6 +1,11 @@
 import { generateId } from '../id'
 import { tracker } from '../tracker'
-import type { ComponentNode, Instruction, VNode } from '../types'
+import type {
+  ComponentNode,
+  HiddenDerivedRequest,
+  Instruction,
+  VNode,
+} from '../types'
 
 export interface ForProps {
   each: () => unknown[]
@@ -16,14 +21,15 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
   const templateId = generateId('tmpl')
   const instructions: Instruction[] = []
   const additionalNodes: ComponentNode[] = []
+  const hiddenDerivedRequests: HiddenDerivedRequest[] = []
 
-  const listScopeId = generateId('list')
+  const listDerivedId = generateId('for')
   const deps = new Set<string>()
 
   // 1. 依存関係の追跡
   if (props && typeof props.each === 'function') {
     tracker.runWithScope(
-      listScopeId,
+      listDerivedId,
       id => deps.add(id),
       () => props.each()
     )
@@ -35,89 +41,77 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
 
   if (typeof itemRenderer === 'function') {
     const SLOT_MARKER = '<!--Q_SLOT-->'
+    const SLOT_REPLACEMENT = '<q-text></q-text>'
 
     // ダミーのシグナルを渡して1回レンダリングし、構造を取得する
+    // item() が呼ばれた箇所がSLOT_MARKERになる
     const vnode = itemRenderer(() => SLOT_MARKER) as VNode
 
     if (vnode && typeof vnode === 'object' && 'html' in vnode) {
       if (vnode.additionalNodes) additionalNodes.push(...vnode.additionalNodes)
-      // スロットマーカーを置換せず、そのままテンプレートにする
-      // ただし、値を注入する場所を特定できるように data-q-slot 属性などを付けるのが理想だが、
-      // 既存の仕組みに合わせて、まずは単純なテンプレートとして出力する。
-      // リコンサイラ側で innerHTML = ... をするのではなく、cloneNode して textContent を埋める形にするには
-      // 埋め込みポイントを知る必要がある。
-      // 今回は簡易的に、テキストノードの置換マーカーとしてそのまま利用する。
-      templateHtml = vnode.html.replace(SLOT_MARKER, '') // 一旦空にしておく
-      // もしvnode.htmlが要素のルートなら、そこにマーカーを付けたいが、
-      // 文字列置換だと難しいので、今回は vnode.html 全体をテンプレートの中身とする
-      // テキスト埋め込みの場合は、テンプレート生成ロジック側で頑張る必要がある
 
-      // 修正: テンプレート内での値のバインディング
-      // 文字列ベースの単純置換ではなく、専用のバインディング記法が必要になるが
-      // 今回は単純化のため、vnode.html 内の SLOT_MARKER を <slot> 的な何かに置き換えるか、
-      // あるいは codegen 側で map して join する方式を変える。
-
-      // ここでは「単一要素のリスト」を想定し、vnode.html をそのまま template とする。
-      // 値の挿入位置は、codegen 側で `textContent = value` 等で行うため、
-      // テンプレート自体には空の要素が入っていれば良い。
-
-      // ただし、現行の h function の実装では、テキストノードは直接埋め込まれる。
-      // `<div>{item}</div>` -> `<div><!--Q_SLOT--></div>`
-      // これをテンプレート化する。
-      templateHtml = vnode.html.replace(SLOT_MARKER, '')
+      // SLOT_MARKER を <q-text> に置換
+      // SLOT_MARKER が含まれている場合は置換し、そうでなければそのまま使う
+      if (vnode.html.includes(SLOT_MARKER)) {
+        templateHtml = vnode.html.replace(SLOT_MARKER, SLOT_REPLACEMENT)
+      } else {
+        // SLOT_MARKER が含まれていない場合（関数呼び出しの結果がテキストノードになっていない）
+        // 要素のtextContent全体を置き換える想定で <q-text> を挿入
+        // 最も内側のテキストを持つ要素に <q-text> を入れる
+        // 簡易的な実装: 末尾の > を置き換えてq-textを入れる
+        const match = vnode.html.match(/^(<[^>]+>)(.*)(<\/[^>]+>)$/)
+        if (match) {
+          templateHtml = `${match[1]}${SLOT_REPLACEMENT}${match[3]}`
+        } else {
+          templateHtml = `<span>${SLOT_REPLACEMENT}</span>`
+        }
+      }
+    } else if (typeof vnode === 'string') {
+      // 単純なテキストの場合
+      templateHtml = `<span>${SLOT_REPLACEMENT}</span>`
     } else {
-      // テキストのみの場合
-      templateHtml = `<span></span>`
+      // フォールバック
+      templateHtml = `<span>${SLOT_REPLACEMENT}</span>`
     }
-
-    // テンプレート生成時に、${v} のようなプレースホルダーを使う形に戻し、
-    // codegen側でそれを使って組み立てる方式をやめ、
-    // 本当の意味での <template> + Clone + Update にする。
-
-    // しかし、h関数の戻り値は静的文字列になっているため、動的なバインディング情報が欠落している。
-    // Forの中で itemRenderer を読んだ時の挙動として、
-    // 生成されるHTMLには "値が入るべき場所" に印がついている必要がある。
-    // 現状の handleFor は MOCK_KEY を渡している。
-
-    // ここでは「テンプレートHTML文字列」を生成する。
-    // 値が入る場所は空にしておくか、特定data属性をつける。
-    // vnode.html が `<div class="item">text</div>` なら
-    // templateHtml も `<div class="item"></div>` にする。
-
-    // 既存ロジック: template = vnode.html.replace(MOCK_KEY, '${v}')
-    // ${v} は codegen で .map(v => `...${v}...`) となる。
-
-    // 新ロジック:
-    // MOCK_KEY の場所を特定できる属性 `data-q-text` 等に置換する？
-    // あるいは slot 要素？
-
-    // 最もシンプルな実装:
-    // MOCK_KEY を `<q-text></q-text>` のようなカスタム要素に置換しておき
-    // ランタイムでそこを埋める。
-    templateHtml = vnode.html.replace(SLOT_MARKER, '<q-text></q-text>')
   }
 
-  const signalId = Array.from(deps)[0]
+  // 3. each関数をhiddenDerivedとして登録
+  // これにより、each関数がderivedとして扱われる
+  if (deps.size > 0) {
+    // each関数の戻り値を返すexpression
+    // deps[0]を使って配列を生成する関数を登録
+    const eachFnStr = props.each.toString()
+
+    hiddenDerivedRequests.push({
+      placeholderId: listDerivedId,
+      deps: Array.from(deps),
+      templateBody: eachFnStr,
+      isExpression: true,
+    })
+  }
+
+  // 4. 命令の登録
+  // signalId として配列を生成するderivedのIDを使う
+  const signalId = deps.size > 0 ? listDerivedId : undefined
   if (signalId) {
     instructions.push({
       signalId,
       selector: `.${qid}`,
       action: 'list',
       template: templateHtml,
-      templateId, // 生成したIDを渡す
+      templateId,
+      listFn: props.each.toString(),
     })
   }
 
-  // 3. VNodeの構築
-  // テンプレートタグ自体もHTMLに含める（非表示）
+  // 5. VNodeの構築
   const templateTag = `<template id="${templateId}">${templateHtml}</template>`
 
   return {
     tag: 'For',
-    // アンカー要素 + テンプレート
     html: `<span class="${qid}" style="display:contents" data-for-anchor></span>${templateTag}`,
     instructions,
-    hiddenDerivedRequests: [],
+    hiddenDerivedRequests,
     additionalNodes,
   }
 }

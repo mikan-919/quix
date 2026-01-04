@@ -94,3 +94,123 @@ describe('Code Generator: 基本的なコード生成', () => {
     expect(output).not.toContain('.innerHTML =')
   })
 })
+
+describe('Code Generator: Forコンポーネントの詳細テスト', () => {
+  test('Forコンポーネントの初期レンダリング: stateの更新関数が初期化時に呼ばれること', () => {
+    const ctx = new ComponentContext('Test')
+    ctx.addState('items', ['A', 'B', 'C'])
+    const itemsId = ctx.getNodeByKey('items')?.id
+
+    ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
+      signalId: itemsId!,
+      selector: '.list-anchor',
+      action: 'list',
+      template: '<li><q-text></q-text></li>',
+      templateId: 'tmpl-items',
+    })
+
+    const output = generateAppJs(ctx)
+
+    // 初期レンダリングで state の更新関数が呼ばれること
+    // state ノードの list 命令があれば _u_a() が Initial Render に含まれるべき
+    expect(output).toMatch(/_u_a\(\);/)
+
+    // リストアイテムを保持するための _q_map が使われていること
+    expect(output).toContain('container._q_map')
+  })
+
+  test('Forコンポーネント: 空配列でもエラーなく動作すること', () => {
+    const ctx = new ComponentContext('Test')
+    ctx.addState('items', [])
+    const itemsId = ctx.getNodeByKey('items')?.id
+
+    ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
+      signalId: itemsId!,
+      selector: '.list-anchor',
+      action: 'list',
+      template: '<span><q-text></q-text></span>',
+      templateId: 'tmpl-empty',
+    })
+
+    const output = generateAppJs(ctx)
+
+    // 配列が空でも _reconcile が呼ばれること
+    expect(output).toContain('_reconcile(_e0, _a, _tmpl_tmpl_empty);')
+    // items.forEach が _reconcile 内で使われていること
+    expect(output).toContain('items.forEach')
+  })
+
+  test('Forコンポーネント: ネストしたHTML構造のテンプレートが正しく処理されること', () => {
+    const ctx = new ComponentContext('Test')
+    ctx.addState('users', [{ name: 'Alice' }, { name: 'Bob' }])
+    const usersId = ctx.getNodeByKey('users')?.id
+
+    ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
+      signalId: usersId!,
+      selector: '.user-list',
+      action: 'list',
+      template:
+        '<div class="user-card"><h3><q-text></q-text></h3><p>Details</p></div>',
+      templateId: 'tmpl-users',
+    })
+
+    const output = generateAppJs(ctx)
+
+    // テンプレートが登録されていること
+    expect(output).toContain(
+      "const _tmpl_tmpl_users = document.getElementById('tmpl-users');"
+    )
+
+    // q-text の置換処理が _reconcile 内にあること
+    expect(output).toContain("clone.querySelector('q-text')")
+    expect(output).toContain('slot.parentNode.replaceChild(textNode, slot)')
+  })
+
+  test('Forコンポーネント: 単一アイテムでも正しく動作すること', () => {
+    const ctx = new ComponentContext('Test')
+    ctx.addState('single', ['Only One'])
+    const singleId = ctx.getNodeByKey('single')?.id
+
+    ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
+      signalId: singleId!,
+      selector: '.single-item',
+      action: 'list',
+      template: '<p><q-text></q-text></p>',
+      templateId: 'tmpl-single',
+    })
+
+    const output = generateAppJs(ctx)
+
+    // 初期化時に更新関数が呼ばれること
+    expect(output).toMatch(/_u_a\(\);/)
+
+    // DOM要素の再利用ロジックがあること (oldMap, newMap)
+    expect(output).toContain('let oldMap = container._q_map')
+    expect(output).toContain('let newMap = new Map()')
+  })
+
+  test('Forコンポーネント: テキストの更新ロジックが正しく動作すること', () => {
+    const ctx = new ComponentContext('Test')
+    ctx.addState('numbers', [1, 2, 3])
+    const numbersId = ctx.getNodeByKey('numbers')?.id
+
+    ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
+      signalId: numbersId!,
+      selector: '.number-list',
+      action: 'list',
+      template: '<span class="num"><q-text></q-text></span>',
+      templateId: 'tmpl-numbers',
+    })
+
+    const output = generateAppJs(ctx)
+
+    // 既存ノードの更新ロジック (_q_text でキャッシュされたテキストノードを更新)
+    expect(output).toContain('node._q_text')
+    expect(output).toContain('node._q_text.textContent')
+  })
+})

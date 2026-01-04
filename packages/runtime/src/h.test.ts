@@ -56,7 +56,8 @@ describe('h function: JSXランタイムの命令生成ロジック', () => {
 
     const inst = vnode.instructions[0]
     expect(inst?.action).toBe('list')
-    expect(inst?.signalId).toBe('s-mock-items')
+    // 新しい実装では for- プレフィックスの独自IDが生成される
+    expect(inst?.signalId).toMatch(/^for-/)
     // item() が呼び出された箇所がテンプレート内で <q-text> になっていること
     expect(inst?.template).toMatch(
       /<div class="item q-.*"><q-text><\/q-text><\/div>/
