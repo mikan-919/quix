@@ -6,10 +6,15 @@ import { handleShow } from './core/components/Show'
 import { generateId } from './core/id'
 import { For, Show } from './core/symbols'
 import { tracker } from './core/tracker'
-import type { HiddenDerivedRequest, Instruction, VNode } from './core/types'
+import type {
+  ComponentNode,
+  HiddenDerivedRequest,
+  Instruction,
+  VNode,
+} from './core/types'
 
 const logger = consola.withTag('Quix:Runtime')
-export function h(tag: any, props: any, ...children: any[]): VNode {
+export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
   // 1 & 2. Component/Symbols 処理 (既存通り)
   if (tag instanceof ComponentBuilder || tag?.__quix_builder)
     return handleComponent(tag, props)
@@ -26,7 +31,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
   const qid = generateId('q')
   const instructions: Instruction[] = []
   const hiddenDerivedRequests: HiddenDerivedRequest[] = []
-  const additionalNodes: any[] = []
+  const additionalNodes: ComponentNode[] = []
   const staticProps: Record<string, string> = {}
   let needsQid = false
 
@@ -50,10 +55,11 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
         const val = tracker.runWithScope(
           generateId('attr'),
           id => deps.add(id),
-          () => (v as Function)()
+          () => (v as () => unknown)()
         )
 
         if (deps.size > 0) {
+          // biome-ignore lint/style/noNonNullAssertion: checked
           const signalId = Array.from(deps)[0]! // 最初の依存ノードに紐付け
           instructions.push({
             signalId,
@@ -81,7 +87,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
 
     // ⭐️ 最適化 C: 単一の関数のみで、他の静的テキストがない場合
     if (flatChildren.length === 1 && typeof flatChildren[0] === 'function') {
-      const fn = flatChildren[0] as Function
+      const fn = flatChildren[0] as () => unknown
       const deps = new Set<string>()
 
       // 依存関係を調査 (checkスコープ)
@@ -93,6 +99,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
 
       // 依存している変数が 1 つだけなら、直接その ID を使う (Shortcut!)
       if (deps.size === 1) {
+        // biome-ignore lint/style/noNonNullAssertion: checked
         const signalId = Array.from(deps)[0]!
         instructions.push({ signalId, selector: `.${qid}`, action: 'setText' })
         processedHtml.push(String(val))
@@ -175,7 +182,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
  */
 function setupComplexTextInterpolation(
   qid: string,
-  flatChildren: any[],
+  flatChildren: unknown[],
   instructions: Instruction[],
   hiddenDerivedRequests: HiddenDerivedRequest[],
   processedHtml: string[]

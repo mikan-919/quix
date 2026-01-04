@@ -1,5 +1,5 @@
+import { watch } from 'node:fs'
 import { build, spawn } from 'bun'
-import { watch } from 'fs'
 
 const ENTRYPOINT = './src/demo.ts'
 

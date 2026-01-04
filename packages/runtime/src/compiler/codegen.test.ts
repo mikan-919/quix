@@ -22,6 +22,7 @@ describe('Code Generator: 基本的なコード生成', () => {
     const countId = ctx.getNodeByKey('count')?.id
 
     // 条件: state.count() > 5
+    // biome-ignore lint/style/noNonNullAssertion: testing
     const conditionId = ctx.addHiddenDerived([countId!], 'state.count() > 5')
     const node = ctx.getNodeById(conditionId) as DerivedNode
     node.isExpression = true
@@ -39,6 +40,7 @@ describe('Code Generator: 基本的なコード生成', () => {
     const valId = ctx.getNodeByKey('val')?.id
 
     ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
       signalId: valId!,
       selector: '.anchor',
       action: 'show',
@@ -66,6 +68,7 @@ describe('Code Generator: 基本的なコード生成', () => {
     const itemsId = ctx.getNodeByKey('items')?.id
 
     ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
       signalId: itemsId!,
       selector: '.list-anchor',
       action: 'list',

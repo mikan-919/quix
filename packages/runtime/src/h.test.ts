@@ -41,13 +41,13 @@ describe('h function: JSXランタイムの命令生成ロジック', () => {
     expect(vnode.hiddenDerivedRequests[0]?.isExpression).toBe(true)
   })
 
-  test('For コンポーネント: リストレンダリングのテンプレート抽出と ${v} 置換', () => {
+  test('For コンポーネント: リストレンダリングのテンプレート抽出と {v} 置換', () => {
     const mockStateItems = () => {
       tracker.report('s-mock-items')
       return ['A', 'B']
     }
 
-    const vnode = h(For, { each: mockStateItems }, (item: () => any) =>
+    const vnode = h(For, { each: mockStateItems }, (item: () => unknown) =>
       h('div', { class: 'item' }, item)
     )
 
@@ -75,7 +75,7 @@ describe('h function: JSXランタイムの命令生成ロジック', () => {
 
     expect(vnode.instructions).toHaveLength(1)
     // 中間ノード (hd-) を作らず、直接 s-original に紐付いているか
-    expect(vnode.instructions[0].signalId).toBe('s-original')
+    expect(vnode.instructions[0]?.signalId).toBe('s-original')
     expect(vnode.hiddenDerivedRequests).toHaveLength(0)
   })
 
@@ -89,7 +89,7 @@ describe('h function: JSXランタイムの命令生成ロジック', () => {
     const vnode = h('span', null, 'Value: ', mockSignal)
 
     // 期待値: hd- ノードが生成され、そちらをsetTextの対象にする
-    expect(vnode.instructions[0].signalId).toContain('hd-')
+    expect(vnode.instructions[0]?.signalId).toContain('hd-')
     expect(vnode.hiddenDerivedRequests).toHaveLength(1)
   })
 

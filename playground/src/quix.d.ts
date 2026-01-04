@@ -8,7 +8,7 @@ declare global {
 
     // TypeScriptに「Propsのどのプロパティが子要素を指すか」を教える（標準は children）
     interface ElementChildrenAttribute {
-      children: {}
+      children: object
     }
 
     // すべての標準タグに共通する基本属性
@@ -17,15 +17,15 @@ declare global {
       class?: string
       style?: string
       // ⭐️ これが必要！子要素（文字列、要素、それらの配列など）を許可する
-      children?: any
+      children?: unknown
 
       // イベントハンドラ（Quix独自の (scope, event) 形式）
-      onclick?: (s: any, e: any) => void
-      oninput?: (s: any, e: any) => void
+      onclick?: (s: unknown, e: unknown) => void
+      oninput?: (s: unknown, e: unknown) => void
 
       // その他、よく使う属性
       placeholder?: string
-      value?: any
+      value?: unknown
       type?: string
       disabled?: boolean | (() => boolean)
     }

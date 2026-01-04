@@ -10,11 +10,12 @@ export interface NodeBase {
 
 export interface StateNode extends NodeBase {
   type: 'state'
-  value: any
+  value: unknown
 }
 
 export interface DerivedNode extends NodeBase {
   type: 'derived'
+  // biome-ignore lint/complexity/noBannedTypes: generic function
   fn: Function
   deps: string[]
   templateBody?: string
@@ -23,12 +24,14 @@ export interface DerivedNode extends NodeBase {
 
 export interface HandlerNode extends NodeBase {
   type: 'handler'
+  // biome-ignore lint/complexity/noBannedTypes: generic function
   fn: Function // ここは内部的にはFunctionだが、Builder上では厳密な型をつける
   deps: string[]
 }
 
 export interface VNode {
-  tag: string | Function | any
+  // biome-ignore lint/complexity/noBannedTypes: generic function
+  tag: string | Function | unknown
   html: string
   instructions: Instruction[]
   hiddenDerivedRequests: HiddenDerivedRequest[]
@@ -78,16 +81,21 @@ export type ToPropsSignal<T> = {
 // ⭐️ Builder の内部状態用の型
 export interface ComponentMetadata {
   name: string
+  // biome-ignore lint/suspicious/noExplicitAny: zod schema
   propsSchema?: z.ZodObject<any>
   // ロジックを保持しておき、親の render 時に再実行できるようにする
   setupFns: {
-    state: Array<{ key: string; valueOrFn: any }>
+    state: Array<{ key: string; valueOrFn: unknown }>
+    // biome-ignore lint/complexity/noBannedTypes: generic function
     derived: Array<{ key: string; depKeys: string[]; fn: Function }>
+    // biome-ignore lint/complexity/noBannedTypes: generic function
     handler: Array<{ key: string; depKeys: string[]; fn: Function }>
-    render?: (args: any) => VNode
+
+    render?: (args: Record<string, unknown>) => VNode
   }
 }
-export type QuixComponent<P = any> = import('./context').ComponentContext & {
-  (props: P): VNode
-  __quix_builder?: any // 内部用
-}
+export type QuixComponent<P = unknown> =
+  import('./context').ComponentContext & {
+    (props: P): VNode
+    __quix_builder?: unknown // 内部用
+  }

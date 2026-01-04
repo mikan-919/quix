@@ -17,7 +17,7 @@ export class ComponentContext {
     return this.instanceId ? `${id}-${this.instanceId}` : id
   }
 
-  addState(key: string, value: any) {
+  addState(key: string, value: unknown) {
     const id = this.createId('s')
     const node: ComponentNode = { id, key, type: 'state', value }
     this.keyMap.set(key, node)
@@ -25,6 +25,7 @@ export class ComponentContext {
     return id
   }
 
+  // biome-ignore lint/complexity/noBannedTypes: generic function storage
   addDerived(key: string, fn: Function, deps: string[]) {
     const id = this.createId('d')
     const node: ComponentNode = { id, key, type: 'derived', fn, deps }
@@ -33,6 +34,7 @@ export class ComponentContext {
     return id
   }
 
+  // biome-ignore lint/complexity/noBannedTypes: generic function storage
   addHandler(key: string, fn: Function, deps: string[]) {
     const id = this.createId('h')
     const node: ComponentNode = { id, key, type: 'handler', fn, deps }

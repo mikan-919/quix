@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { h } from '../h'
 import { component } from './builder'
 
+import type { VNode } from './types'
+
 describe('Component Composition: コンポーネントの合成', () => {
   test('命令のバブリング: 子の更新命令が親のコンテキストに集約されること', () => {
     // 1. 子コンポーネントの定義
@@ -11,7 +13,12 @@ describe('Component Composition: コンポーネントの合成', () => {
 
     // 2. 親コンポーネントでの使用
     const Parent = component('Parent').render(() =>
-      h('div', null, h('h1', null, 'Parent'), h(Child as any, null))
+      h(
+        'div',
+        null,
+        h('h1', null, 'Parent'),
+        h(Child as unknown as VNode, null)
+      )
     )
 
     // HTMLが統合されているか

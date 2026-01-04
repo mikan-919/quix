@@ -6,7 +6,9 @@ import consola from 'consola'
 import type { ComponentContext } from '../core/context'
 import type { DerivedNode } from '../core/types'
 
+// biome-ignore lint/suspicious/noExplicitAny: module interop
 const traverse = (_traverse as any).default || _traverse
+// biome-ignore lint/suspicious/noExplicitAny: module interop
 const generate = (_generate as any).default || _generate
 
 // AST変換関数 (transformCode) は変更なし
@@ -39,6 +41,7 @@ function transformCode(
       }
     }
     traverse(ast, {
+      // biome-ignore lint/suspicious/noExplicitAny: babel types
       CallExpression(innerPath: any) {
         const callee = innerPath.node.callee
         if (
@@ -65,6 +68,7 @@ function transformCode(
             const assignment = t.assignmentExpression(
               '=',
               t.identifier(shortName),
+              // biome-ignore lint/suspicious/noExplicitAny: ast node
               args[0] as any
             )
             const updateCall = t.callExpression(
@@ -139,6 +143,7 @@ export function generateAppJs(context: ComponentContext) {
 
   const templateDecls = showInsts
     .map(si => {
+      // biome-ignore lint/style/noNonNullAssertion: filtered
       const tId = si.templateId!.replace(/-/g, '_')
       return `  const _tmpl_${tId} = document.getElementById('${si.templateId}');`
     })
@@ -146,6 +151,7 @@ export function generateAppJs(context: ComponentContext) {
 
   const rebindFns = showInsts
     .map(si => {
+      // biome-ignore lint/style/noNonNullAssertion: filtered
       const tId = si.templateId!.replace(/-/g, '_')
       const internalInsts = instructions.filter(
         i =>
@@ -165,6 +171,7 @@ export function generateAppJs(context: ComponentContext) {
   const stateDecls = nodes
     .filter(n => n.type === 'state')
     .map(
+      // biome-ignore lint/suspicious/noExplicitAny: json stringify
       n => `  let ${idToShort.get(n.id)} = ${JSON.stringify((n as any).value)};`
     )
     .join('\n')
@@ -182,6 +189,7 @@ export function generateAppJs(context: ComponentContext) {
         } else {
           const firstDep = node.deps[0]
           const depRef = firstDep ? `\${${getRef(firstDep)}}` : ''
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: code generation of template string
           const body = `\`${node.templateBody.replace('${val}', depRef)}\``
           return `  const ${name} = () => ${body};`
         }
@@ -204,6 +212,7 @@ export function generateAppJs(context: ComponentContext) {
   let keptCount = 0
 
   const needsUpdate = (nodeId: string): boolean => {
+    // biome-ignore lint/style/noNonNullAssertion: checked
     if (needsUpdateCache.has(nodeId)) return needsUpdateCache.get(nodeId)!
 
     const nodeShort = idToShort.get(nodeId) || nodeId

@@ -1,8 +1,12 @@
 import { generateId } from '../id'
 import { tracker } from '../tracker'
-import type { Instruction, VNode } from '../types'
+import type { ComponentNode, Instruction, VNode } from '../types'
 
-export function handleFor(props: any, children: any[]): VNode {
+export interface ForProps {
+  each: () => unknown[]
+}
+
+export function handleFor(props: ForProps, children: unknown[]): VNode {
   /*
    * Forコンポーネント: リストレンダリング
    * items: Signal<any[]>
@@ -11,7 +15,7 @@ export function handleFor(props: any, children: any[]): VNode {
   const qid = generateId('q')
   const templateId = generateId('tmpl')
   const instructions: Instruction[] = []
-  const additionalNodes: any[] = []
+  const additionalNodes: ComponentNode[] = []
 
   const listScopeId = generateId('list')
   const deps = new Set<string>()
@@ -33,7 +37,7 @@ export function handleFor(props: any, children: any[]): VNode {
     const SLOT_MARKER = '<!--Q_SLOT-->'
 
     // ダミーのシグナルを渡して1回レンダリングし、構造を取得する
-    const vnode = itemRenderer(() => SLOT_MARKER)
+    const vnode = itemRenderer(() => SLOT_MARKER) as VNode
 
     if (vnode && typeof vnode === 'object' && 'html' in vnode) {
       if (vnode.additionalNodes) additionalNodes.push(...vnode.additionalNodes)
@@ -93,9 +97,10 @@ export function handleFor(props: any, children: any[]): VNode {
     templateHtml = vnode.html.replace(SLOT_MARKER, '<q-text></q-text>')
   }
 
-  if (deps.size > 0) {
+  const signalId = Array.from(deps)[0]
+  if (signalId) {
     instructions.push({
-      signalId: Array.from(deps)[0]!,
+      signalId,
       selector: `.${qid}`,
       action: 'list',
       template: templateHtml,
