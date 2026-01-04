@@ -114,9 +114,52 @@ export function generateAppJs(context: ComponentContext) {
     return node.type === 'derived' ? `${name}()` : name
   }
 
+  const showInsts = instructions.filter(
+    i => i.action === 'show' && i.templateId
+  )
+  const selectorsInsideShow = new Set<string>()
+  for (const si of showInsts) {
+    for (const i of instructions) {
+      if (
+        i.selector !== si.selector &&
+        si.template?.includes(i.selector.replace(/^\./, ''))
+      ) {
+        selectorsInsideShow.add(i.selector)
+      }
+    }
+  }
+
   const selectors = Array.from(new Set(instructions.map(i => i.selector)))
   const domCache = selectors
-    .map((sel, i) => `  const _e${i} = root.querySelector('${sel}');`)
+    .map((sel, i) => {
+      const isInside = selectorsInsideShow.has(sel)
+      return `  ${isInside ? 'let' : 'const'} _e${i} = root.querySelector('${sel}');`
+    })
+    .join('\n')
+
+  const templateDecls = showInsts
+    .map(si => {
+      const tId = si.templateId!.replace(/-/g, '_')
+      return `  const _tmpl_${tId} = document.getElementById('${si.templateId}');`
+    })
+    .join('\n')
+
+  const rebindFns = showInsts
+    .map(si => {
+      const tId = si.templateId!.replace(/-/g, '_')
+      const internalInsts = instructions.filter(
+        i =>
+          i.selector !== si.selector &&
+          si.template?.includes(i.selector.replace(/^\./, ''))
+      )
+      const rebindBody = Array.from(new Set(internalInsts.map(i => i.selector)))
+        .map(sel => {
+          const idx = selectors.indexOf(sel)
+          return `    _e${idx} = root.querySelector('${sel}');`
+        })
+        .join('\n')
+      return `  function _u_rebind_${tId}() {\n${rebindBody}\n  }`
+    })
     .join('\n')
 
   const stateDecls = nodes
@@ -224,8 +267,19 @@ export function generateAppJs(context: ComponentContext) {
             }
             return `    if(_e${elIdx}) _e${elIdx}.setAttribute('${attr}', ${ref});`
           }
-          if (i.action === 'show' && i.template) {
-            return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)} ? \`${i.template}\` : '';`
+          if (i.action === 'show' && i.templateId) {
+            const tId = i.templateId.replace(/-/g, '_')
+            return `    if(_e${elIdx}) {
+      const _cond = ${getRef(node.id)};
+      if(_cond) {
+        if(!_e${elIdx}.firstChild) {
+          if(_tmpl_${tId}) _e${elIdx}.appendChild(_tmpl_${tId}.content.cloneNode(true));
+        }
+        _u_rebind_${tId}();
+      } else {
+        _e${elIdx}.innerHTML = '';
+      }
+    }`
           }
           if (i.action === 'list' && i.template) {
             return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)}.map(v => \`${i.template}\`).join('');`
@@ -285,6 +339,8 @@ export function generateAppJs(context: ComponentContext) {
   if (!root) return;
 
 ${domCache}
+${templateDecls}
+${rebindFns}
 ${stateDecls}
 ${derivedDecls}
 ${updates}

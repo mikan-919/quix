@@ -12,7 +12,9 @@ export function handleShow(props: any, children: any[]): VNode {
   const deps = new Set<string>()
   let templateBody = ''
 
+  let initialWhen = false
   if (props && typeof props.when === 'function') {
+    initialWhen = tracker.silence(() => props.when())
     tracker.runWithScope(
       conditionId,
       id => deps.add(id),
@@ -45,16 +47,19 @@ export function handleShow(props: any, children: any[]): VNode {
     }
   })
 
+  const templateId = generateId('tmpl')
+  const innerHtml = childHtmlParts.join('')
   instructions.push({
     signalId: conditionId,
     selector: `.${qid}`,
     action: 'show',
-    template: childHtmlParts.join(''),
+    template: innerHtml,
+    templateId,
   })
 
   return {
     tag: 'Show',
-    html: `<span class="${qid}" style="display:contents" data-show-anchor></span>`,
+    html: `<span class="${qid}" style="display:contents" data-show-anchor>${initialWhen ? innerHtml : ''}</span><template id="${templateId}">${innerHtml}</template>`,
     instructions,
     hiddenDerivedRequests,
     additionalNodes,

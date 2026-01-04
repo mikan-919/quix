@@ -66,7 +66,6 @@ describe('Quix Analysis Engine: コンポーネント解析の詳細検証', () 
       )
 
     const allNodes = ctx.getAllNodes()
-    // h.ts で生成された 'cond-[コンポーネント名]' 形式の ID を探す
     const conditionNode = allNodes.find(n => n.id.includes('cond-TestApp'))
 
     expect(conditionNode).toBeDefined()
@@ -74,7 +73,105 @@ describe('Quix Analysis Engine: コンポーネント解析の詳細検証', () 
     const showInst = ctx.instructions.find(i => i.action === 'show')
     expect(showInst).toBeDefined()
     expect(showInst?.signalId).toBe(conditionNode?.id)
-    expect(showInst?.template).toBe('<p>Big!</p>')
+    // テンプレートIDが含まれているか
+    expect(showInst?.templateId).toBeDefined()
+  })
+
+  test('Show コンポーネントのSSR: 初期状態が真の場合、HTMLにコンテンツが含まれること', () => {
+    const ctx = component('TestApp')
+      .state('visible', true)
+      .render(({ state }) =>
+        h(
+          Show,
+          { when: () => state.visible() },
+          h('span', null, 'Visible Content')
+        )
+      )
+
+    // 初期状態が真なので、コンテンツがHTMLに含まれているべき
+    expect(ctx.html).toContain('data-show-anchor><span>Visible Content</span>')
+    // テンプレートタグも含まれているべき
+    expect(ctx.html).toContain('<template id="tmpl-TestApp-')
+    expect(ctx.html).toContain('Visible Content</span></template>')
+  })
+
+  test('Show コンポーネントのSSR: 初期状態が偽の場合、HTMLが空でテンプレートのみ含まれること', () => {
+    const ctx = component('TestApp')
+      .state('visible', false)
+      .render(({ state }) =>
+        h(
+          Show,
+          { when: () => state.visible() },
+          h('span', null, 'Hidden Content')
+        )
+      )
+
+    // 初期状態が偽なので、アンカー部分は空
+    expect(ctx.html).toContain('data-show-anchor></span>')
+    // ただしテンプレートとしては存在する
+    expect(ctx.html).toContain('<template id="tmpl-TestApp-')
+    expect(ctx.html).toContain('Hidden Content</span></template>')
+  })
+
+  test('Show コンポーネント内の動的要素: 内部のシグナル依存が正しく抽出されること', () => {
+    const ctx = component('TestApp')
+      .state('visible', true)
+      .state('count', 123)
+      .render(({ state }) =>
+        h(
+          Show,
+          { when: () => state.visible() },
+          h(
+            'div',
+            null,
+            h('span', null, 'Count: ', () => state.count())
+          )
+        )
+      )
+
+    // 初期HTMLに現在の値が含まれているか
+    expect(ctx.html).toContain('Count: 123')
+
+    // 内部のsetText命令が生成されているか
+    const setTextInst = ctx.instructions.find(i => i.action === 'setText')
+    expect(setTextInst).toBeDefined()
+
+    // 内部要素の更新命令のセレクタがShowのテンプレート内にも反映されているか（ハイドレーション用）
+    expect(ctx.html).toContain(setTextInst?.selector.replace('.', ''))
+  })
+
+  test('Show コンポーネント内の大規模要素: 静的構造が正しく保持されること', () => {
+    const ctx = component('TestApp')
+      .state('visible', true)
+      .render(({ state }) =>
+        h(
+          Show,
+          { when: () => state.visible() },
+          h(
+            'div',
+            { class: 'container' },
+            h('header', null, h('h1', null, 'Title')),
+            h(
+              'main',
+              null,
+              h('p', null, 'Paragraph 1'),
+              h('p', null, 'Paragraph 2'),
+              h(
+                'ul',
+                null,
+                h('li', null, 'Item 1'),
+                h('li', null, 'Item 2'),
+                h('li', null, 'Item 3')
+              )
+            ),
+            h('footer', null, 'Footer')
+          )
+        )
+      )
+
+    expect(ctx.html).toContain('<header><h1>Title</h1></header>')
+    expect(ctx.html).toContain('<li>Item 3</li>')
+    expect(ctx.html).toContain('<template')
   })
 
   test('静的HTMLの生成: リアクティブでない要素に QID が付与されないこと', () => {
