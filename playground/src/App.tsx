@@ -18,8 +18,7 @@ const App: QuixComponent = component('App')
       <For each={Array.from({ length: state.count() }, (_, i) => i)}>
         {item => (
           <p>
-            AA{item()}
-            {'#'.repeat(item())}
+            <Display value={item()} />
           </p>
         )}
       </For>

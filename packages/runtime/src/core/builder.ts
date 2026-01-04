@@ -141,9 +141,11 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
         typeof val === 'function' ? tracker.silence(() => val()) : val
     }
 
-    // バリデーション実行（Root時はスキップ）
+    // バリデーション実行（Root時やProbing時はスキップ）
     const validatedProps =
-      this.schema && !isRoot ? this.schema.parse(peekProps) : peekProps
+      this.schema && !isRoot && !tracker.isProbing()
+        ? this.schema.parse(peekProps)
+        : peekProps
     // バリデーション成功ログ
     if (this.schema && !isRoot) {
       logger.debug(`[${this.name}] Props validated successfully.`)

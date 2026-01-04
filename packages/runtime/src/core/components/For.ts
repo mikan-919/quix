@@ -51,7 +51,14 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
       tracker.report(itemSignalId)
       return SLOT_MARKER
     }
-    const vnode = itemRenderer(spyItem) as VNode
+
+    tracker.startProbing()
+    let vnode: VNode
+    try {
+      vnode = itemRenderer(spyItem) as VNode
+    } finally {
+      tracker.stopProbing()
+    }
 
     if (vnode && typeof vnode === 'object' && 'html' in vnode) {
       if (vnode.additionalNodes) additionalNodes.push(...vnode.additionalNodes)
