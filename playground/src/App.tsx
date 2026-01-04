@@ -1,4 +1,4 @@
-import { component, type QuixComponent } from '@quix/runtime'
+import { component, type QuixComponent, Show } from '@quix/runtime'
 import z from 'zod'
 
 const Display = component('Display')
@@ -6,7 +6,7 @@ const Display = component('Display')
   .render(({ props }) => <h2>Double: {props.value()}</h2>)
 
 const App: QuixComponent = component('App')
-  .state('count', 0)
+  .state('count', 1)
   .derived('double', ['count'], s => s.count() * 2)
   .handler('inc', ['count'], s => s.count(s.count() + 1))
   .render(({ state, handlers }) => (
@@ -15,6 +15,9 @@ const App: QuixComponent = component('App')
       <button type='button' onclick={handlers.inc}>
         Count is: {state.count()}
       </button>
+      <Show when={state.count() % 2 === 1}>
+        <p>Count is Even</p>
+      </Show>
       <Display value={state.double()} />
     </div>
   ))
