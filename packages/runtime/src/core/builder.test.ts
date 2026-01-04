@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { h, Show } from '../index'
+import { For, h, Show } from '../index'
 import { component } from './builder'
 
 describe('Quix Analysis Engine: コンポーネント解析の詳細検証', () => {
@@ -195,5 +195,159 @@ describe('Quix Analysis Engine: コンポーネント解析の詳細検証', () 
     // SSR/ハイドレーションのために、複数回実行しても ID (s-App-0等) が一致する必要がある
     expect(ctx1.html).toBe(ctx2.html)
     expect(ctx1.html).toContain('App')
+  })
+})
+
+describe('Quix Analysis Engine: Forコンポーネントの詳細検証', () => {
+  test('For コンポーネントの解析: list 命令と依存追跡', () => {
+    const ctx = component('TestApp')
+      .state('items', ['A', 'B', 'C'])
+      .render(({ state }) =>
+        h(
+          'div',
+          null,
+          h(For, { each: () => state.items() }, (item: () => unknown) =>
+            h('li', null, item)
+          )
+        )
+      )
+
+    // list 命令が生成されていること
+    const listInst = ctx.instructions.find(i => i.action === 'list')
+    expect(listInst).toBeDefined()
+
+    // signalId が新しい for-derived のIDになっていること
+    // 新しい実装では、1つの配列生成derivedが作られる
+    expect(listInst?.signalId).toMatch(/^for-/)
+
+    // テンプレートHTMLが含まれていること
+    expect(listInst?.template).toBeDefined()
+    expect(listInst?.templateId).toBeDefined()
+  })
+
+  test('For コンポーネント: テンプレートに q-text マーカーが含まれること', () => {
+    const ctx = component('TestApp')
+      .state('numbers', [1, 2, 3])
+      .render(({ state }) =>
+        h(For, { each: () => state.numbers() }, (item: () => unknown) =>
+          h('span', { class: 'number' }, item)
+        )
+      )
+
+    const listInst = ctx.instructions.find(i => i.action === 'list')
+    expect(listInst).toBeDefined()
+
+    // テンプレート内に q-text が含まれていること
+    expect(listInst?.template).toContain('<q-text>')
+    expect(listInst?.template).toContain('</q-text>')
+  })
+
+  test('For コンポーネント: HTMLにアンカーとテンプレートが含まれること', () => {
+    const ctx = component('TestApp')
+      .state('list', ['x', 'y'])
+      .render(({ state }) =>
+        h(For, { each: () => state.list() }, (item: () => unknown) =>
+          h('p', null, item)
+        )
+      )
+
+    // アンカー要素
+    expect(ctx.html).toContain('data-for-anchor')
+    // テンプレートタグ
+    expect(ctx.html).toContain('<template id="tmpl-')
+    expect(ctx.html).toContain('</template>')
+  })
+
+  test('For コンポーネント: 派生ステート経由の配列でも正しく動作すること', () => {
+    const ctx = component('TestApp')
+      .state('count', 3)
+      .derived('range', ['count'], s =>
+        Array.from({ length: s.count() }, (_, i) => i)
+      )
+      .render(({ state }) =>
+        h(For, { each: () => state.range() }, (item: () => unknown) =>
+          h('span', null, item)
+        )
+      )
+
+    // 派生ステートが登録されていること
+    const rangeNode = ctx.getNodeByKey('range')
+    expect(rangeNode).toBeDefined()
+    expect(rangeNode?.type).toBe('derived')
+
+    // list 命令が生成されていること
+    const listInst = ctx.instructions.find(i => i.action === 'list')
+    expect(listInst).toBeDefined()
+    // 新しい実装では for- プレフィックスの独自のderivedがforループの配列を生成する
+    expect(listInst?.signalId).toMatch(/^for-/)
+  })
+
+  test('For コンポーネント: 複雑なテンプレート（ネスト要素）でも動作すること', () => {
+    const ctx = component('TestApp')
+      .state('users', [{ name: 'Alice' }, { name: 'Bob' }])
+      .render(({ state }) =>
+        h(For, { each: () => state.users() }, (user: () => unknown) =>
+          h(
+            'div',
+            { class: 'user-card' },
+            h('h3', null, user),
+            h('p', null, 'Details')
+          )
+        )
+      )
+
+    const listInst = ctx.instructions.find(i => i.action === 'list')
+    expect(listInst).toBeDefined()
+
+    // テンプレートにネスト構造が含まれていること
+    expect(listInst?.template).toContain('<div')
+    expect(listInst?.template).toContain('<h3')
+    expect(listInst?.template).toContain('<p')
+    expect(listInst?.template).toContain('Details')
+  })
+
+  test('For コンポーネント: Array.from パターンでの依存追跡（プレイグラウンドと同じパターン）', () => {
+    // App.tsx のパターンを再現: Array.from({ length: state.count() }, (_, i) => i)
+    const ctx = component('TestApp')
+      .state('count', 3)
+      .render(({ state }) =>
+        h(
+          For,
+          { each: () => Array.from({ length: state.count() }, (_, i) => i) },
+          (item: () => unknown) => h('p', null, item)
+        )
+      )
+
+    // count ノードが存在すること
+    const countNode = ctx.getNodeByKey('count')
+    expect(countNode).toBeDefined()
+
+    // list 命令が生成されていること
+    const listInst = ctx.instructions.find(i => i.action === 'list')
+    expect(listInst).toBeDefined()
+
+    // 重要: signalId が for- プレフィックスの独自のIDになっていること
+    // 配列生成の each 関数が derived として登録される
+    expect(listInst?.signalId).toMatch(/^for-/)
+  })
+
+  test('For コンポーネント: 生成されるコードの検証（初期化含む）', () => {
+    const ctx = component('TestApp')
+      .state('items', [1, 2, 3])
+      .render(({ state }) =>
+        h(For, { each: () => state.items() }, (item: () => unknown) =>
+          h('span', null, item)
+        )
+      )
+
+    // コード生成
+    const { generateAppJs } = require('../compiler/codegen')
+    const code = generateAppJs(ctx)
+
+    // state の更新関数が初期化で呼ばれること
+    expect(code).toContain('_u_a();')
+
+    // _reconcile が呼ばれていること
+    expect(code).toContain('_reconcile(')
   })
 })

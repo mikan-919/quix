@@ -47,6 +47,7 @@ export interface Instruction {
   attrName?: string
   template?: string
   templateId?: string
+  listFn?: string // For用: each関数の文字列表現
 }
 
 export interface HiddenDerivedRequest {

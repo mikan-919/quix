@@ -1,4 +1,4 @@
-import { component, type QuixComponent, Show } from '@quix/runtime'
+import { component, For, type QuixComponent, Show } from '@quix/runtime'
 import z from 'zod'
 
 const Display = component('Display')
@@ -15,10 +15,9 @@ const App: QuixComponent = component('App')
       <button type='button' onclick={handlers.inc}>
         Count is: {state.count()}
       </button>
-      <Show when={state.count() % 2 === 1}>
-        <p>Count is Even</p>
-        <p>Half is {state.count() / 2}</p>
-      </Show>
+      <For each={Array.from({ length: state.count() }, (_, i) => i)}>
+        {item => <p>{'#'.repeat(item())}</p>}
+      </For>
       <Display value={state.double()} />
     </div>
   ))

@@ -185,7 +185,15 @@ export function generateAppJs(context: ComponentContext) {
       let fnStr = ''
       if (node.templateBody) {
         if (node.isExpression) {
-          fnStr = `() => ${node.templateBody}`
+          // templateBody がすでにアロー関数 (() => ...) の場合はそのまま使う
+          if (
+            node.templateBody.trim().startsWith('()') ||
+            node.templateBody.trim().startsWith('(')
+          ) {
+            fnStr = node.templateBody
+          } else {
+            fnStr = `() => ${node.templateBody}`
+          }
         } else {
           const firstDep = node.deps[0]
           const depRef = firstDep ? `\${${getRef(firstDep)}}` : ''
@@ -292,6 +300,8 @@ export function generateAppJs(context: ComponentContext) {
           }
           if (i.action === 'list' && i.templateId) {
             const tId = i.templateId.replace(/-/g, '_')
+            // listFnがある場合は、derivedノードとして登録されているはず
+            // そのderivedの値（配列）を使う
             return `    if(_e${elIdx}) _reconcile(_e${elIdx}, ${getRef(
               node.id
             )}, _tmpl_${tId});`
@@ -318,10 +328,12 @@ export function generateAppJs(context: ComponentContext) {
       // Initial Renderリストへの追加
       if (node.type === 'state') initialCallList.push(`_u${sName}()`)
       if (node.type === 'derived') {
-        const isShowCondition = instructions.some(
-          inst => inst.signalId === node.id && inst.action === 'show'
+        const needsInitialCall = instructions.some(
+          inst =>
+            inst.signalId === node.id &&
+            (inst.action === 'show' || inst.action === 'list')
         )
-        if (isShowCondition) initialCallList.push(`_u${sName}()`)
+        if (needsInitialCall) initialCallList.push(`_u${sName}()`)
       }
 
       return `  function _u${sName}() {\n${domOps}\n${cascades}\n  }`
