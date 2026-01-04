@@ -33,7 +33,7 @@ describe('Code Generator: 基本的なコード生成', () => {
     expect(output).not.toContain('`')
   })
 
-  test('Show命令の更新ロジック: 三項演算子によるinnerHTMLの切り替え', () => {
+  test('Show命令の更新ロジック: HTMLテンプレートからの取得とクローニングに加え、リバインドの呼び出し', () => {
     const ctx = new ComponentContext('Test')
     ctx.addState('val', true)
     const valId = ctx.getNodeByKey('val')?.id
@@ -43,11 +43,20 @@ describe('Code Generator: 基本的なコード生成', () => {
       selector: '.anchor',
       action: 'show',
       template: '<p>Hi</p>',
+      templateId: 'tmpl-test-id',
     })
 
     const output = generateAppJs(ctx)
 
-    // 条件に応じたテンプレートの挿入ロジックを確認
-    expect(output).toMatch(/\.innerHTML = _[a-z] \? `<p>Hi<\/p>` : '';/)
+    // テンプレート取得ロジック
+    expect(output).toContain(
+      "const _tmpl_tmpl_test_id = document.getElementById('tmpl-test-id');"
+    )
+    // クローニングとリバインドロジック
+    expect(output).toContain('if(!_e0.firstChild)')
+    expect(output).toContain(
+      '_e0.appendChild(_tmpl_tmpl_test_id.content.cloneNode(true))'
+    )
+    expect(output).toContain('_u_rebind_tmpl_test_id()')
   })
 })

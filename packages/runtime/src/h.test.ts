@@ -27,9 +27,9 @@ describe('h function: JSXランタイムの命令生成ロジック', () => {
     const vnode = h(Show, { when: conditionFn }, h('span', null, 'Content'))
 
     // アンカー要素の出力確認
-    expect(vnode.html).toMatch(
-      /<span\s+class="q-.*"\s+style="display:contents"\s+data-show-anchor><\/span>/
-    )
+    expect(vnode.html).toContain('data-show-anchor><span>Content</span></span>')
+    expect(vnode.html).toContain('<template id="tmpl-')
+    expect(vnode.html).toContain('<span>Content</span></template>')
 
     expect(vnode.instructions).toHaveLength(1)
     const inst = vnode.instructions[0]
