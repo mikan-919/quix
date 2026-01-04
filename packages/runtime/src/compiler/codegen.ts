@@ -115,7 +115,7 @@ export function generateAppJs(context: ComponentContext) {
   }
 
   const showInsts = instructions.filter(
-    i => i.action === 'show' && i.templateId
+    i => (i.action === 'show' || i.action === 'list') && i.templateId
   )
   const selectorsInsideShow = new Set<string>()
   for (const si of showInsts) {
@@ -281,8 +281,11 @@ export function generateAppJs(context: ComponentContext) {
       }
     }`
           }
-          if (i.action === 'list' && i.template) {
-            return `    if(_e${elIdx}) _e${elIdx}.innerHTML = ${getRef(node.id)}.map(v => \`${i.template}\`).join('');`
+          if (i.action === 'list' && i.templateId) {
+            const tId = i.templateId.replace(/-/g, '_')
+            return `    if(_e${elIdx}) _reconcile(_e${elIdx}, ${getRef(
+              node.id
+            )}, _tmpl_${tId});`
           }
           return ''
         })
@@ -337,6 +340,68 @@ export function generateAppJs(context: ComponentContext) {
   return `(function() {
   const root = document.getElementById("app");
   if (!root) return;
+
+  function _reconcile(container, items, template) {
+    let oldMap = container._q_map || new Map();
+    let newMap = new Map();
+    
+    // 1. Prepare nodes
+    items.forEach(item => {
+       // Simple key strategy: use item if primitive, or item.key if exists, or item itself
+       const key = (typeof item === 'object' && item !== null && 'key' in item) ? item.key : item;
+       let node = oldMap.get(key);
+       if (!node) {
+         const clone = template.content.cloneNode(true);
+         const slot = clone.querySelector('q-text');
+         if (slot) {
+            const textNode = document.createTextNode(String(item));
+            slot.parentNode.replaceChild(textNode, slot);
+            // We assume the first child of the template is the item node
+            // But clone implies DocumentFragment. 
+            // clone.firstElementChild is the element.
+            if (clone.firstElementChild) {
+               clone.firstElementChild._q_text = textNode;
+            }
+         }
+         node = clone.firstElementChild;
+       } else {
+         // Update text content if changed (and if we have a handle)
+         if (node._q_text && node._q_text.textContent !== String(item)) {
+            node._q_text.textContent = String(item);
+         }
+       }
+       if (node) newMap.set(key, node);
+    });
+    
+    // 2. Align DOM
+    let cursor = container.firstElementChild;
+    // The instruction selector points to the span anchor.
+    // We treat the span as the container for the list items.
+    
+    cursor = container.firstElementChild; 
+    
+    items.forEach(item => {
+       const key = (typeof item === 'object' && item !== null && 'key' in item) ? item.key : item;
+       const node = newMap.get(key);
+       
+       if (node) {
+         if (node !== cursor) {
+            container.insertBefore(node, cursor);
+         } else {
+            cursor = cursor.nextElementSibling;
+         }
+       }
+    });
+    
+    // 3. Remove rest
+    while(cursor) {
+       const next = cursor.nextElementSibling;
+       cursor.remove();
+       cursor = next;
+    }
+    
+    container._q_map = newMap;
+  }
 
 ${domCache}
 ${templateDecls}

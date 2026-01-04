@@ -57,8 +57,11 @@ describe('h function: JSXランタイムの命令生成ロジック', () => {
     const inst = vnode.instructions[0]
     expect(inst?.action).toBe('list')
     expect(inst?.signalId).toBe('s-mock-items')
-    // item() が呼び出された箇所がテンプレート内で ${v} になっていること
-    expect(inst?.template).toMatch(/<div class="item q-.*">\${v}<\/div>/)
+    // item() が呼び出された箇所がテンプレート内で <q-text> になっていること
+    expect(inst?.template).toMatch(
+      /<div class="item q-.*"><q-text><\/q-text><\/div>/
+    )
+    expect(inst?.templateId).toBeDefined()
   })
 
   test('最適化 A: 単一シグナルの補間は Hidden Derived を作らず直結すること', () => {

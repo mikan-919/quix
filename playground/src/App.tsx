@@ -17,6 +17,7 @@ const App: QuixComponent = component('App')
       </button>
       <Show when={state.count() % 2 === 1}>
         <p>Count is Even</p>
+        <p>Half is {state.count() / 2}</p>
       </Show>
       <Display value={state.double()} />
     </div>
