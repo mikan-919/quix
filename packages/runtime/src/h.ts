@@ -1,24 +1,37 @@
+import consola from 'consola'
 import { ComponentBuilder } from './core/builder'
 import { handleComponent } from './core/components/Component'
 import { handleFor } from './core/components/For'
 import { handleShow } from './core/components/Show'
-import { generateId } from './core/id'
+import { generateId, getActiveContext } from './core/id'
 import { For, Show } from './core/symbols'
 import { tracker } from './core/tracker'
-import type { HiddenDerivedRequest, Instruction, VNode } from './core/types'
+import type {
+  ComponentNode,
+  HiddenDerivedRequest,
+  Instruction,
+  VNode,
+} from './core/types'
 
-export function h(tag: any, props: any, ...children: any[]): VNode {
+const logger = consola.withTag('Quix:Runtime')
+export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
   // 1 & 2. Component/Symbols 処理 (既存通り)
   if (tag instanceof ComponentBuilder || tag?.__quix_builder)
     return handleComponent(tag, props)
-  if (tag === Show) return handleShow(props, children)
-  if (tag === For) return handleFor(props, children)
+  if (tag === Show) {
+    logger.trace('Processing <Show> block')
+    return handleShow(props, children)
+  }
+  if (tag === For) {
+    logger.trace('Processing <For> loop')
+    return handleFor(props, children)
+  }
 
   // 3. Normal HTML Tags
   const qid = generateId('q')
   const instructions: Instruction[] = []
   const hiddenDerivedRequests: HiddenDerivedRequest[] = []
-  const additionalNodes: any[] = []
+  const additionalNodes: ComponentNode[] = []
   const staticProps: Record<string, string> = {}
   let needsQid = false
 
@@ -31,8 +44,10 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
           selector: `.${qid}`,
           action: 'addListener',
           attrName: k.toLowerCase().replace(/^on/, ''),
+          context: getActiveContext(),
         })
         needsQid = true
+        logger.trace(`  Bind Handler: ${k} -> ${handlerId}`)
       }
       // ⭐️ 属性のリアクティブ化の追加
       else if (typeof v === 'function') {
@@ -41,18 +56,21 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
         const val = tracker.runWithScope(
           generateId('attr'),
           id => deps.add(id),
-          () => (v as Function)()
+          () => (v as () => unknown)()
         )
 
         if (deps.size > 0) {
+          // biome-ignore lint/style/noNonNullAssertion: checked
           const signalId = Array.from(deps)[0]! // 最初の依存ノードに紐付け
           instructions.push({
             signalId,
             selector: `.${qid}`,
             action: 'setAttr',
             attrName: k,
+            context: getActiveContext(),
           })
           needsQid = true
+          logger.trace(`  Bind Reactive Prop: ${k} -> ${signalId}`)
         }
         staticProps[k] = String(val) // 初期値を静的HTML用プロパティに設定
       } else {
@@ -71,7 +89,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
 
     // ⭐️ 最適化 C: 単一の関数のみで、他の静的テキストがない場合
     if (flatChildren.length === 1 && typeof flatChildren[0] === 'function') {
-      const fn = flatChildren[0] as Function
+      const fn = flatChildren[0] as () => unknown
       const deps = new Set<string>()
 
       // 依存関係を調査 (checkスコープ)
@@ -81,14 +99,29 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
         () => fn()
       )
 
+      // 1. Forアイテム依存のチェック
+      const isItemDep = Array.from(deps).some(id => id.startsWith('for-item-'))
+
       // 依存している変数が 1 つだけなら、直接その ID を使う (Shortcut!)
-      if (deps.size === 1) {
+      if (deps.size === 1 && !isItemDep) {
+        // biome-ignore lint/style/noNonNullAssertion: checked
         const signalId = Array.from(deps)[0]!
-        instructions.push({ signalId, selector: `.${qid}`, action: 'setText' })
+        instructions.push({
+          signalId,
+          selector: `.${qid}`,
+          action: 'setText',
+          context: getActiveContext(),
+        })
         processedHtml.push(String(val))
         // hiddenDerivedRequests への追加は不要（中間ノードをスキップ）
+        logger.debug(
+          `Optimization: Shortcuts direct signal access for <${tag}>`
+        )
       } else {
-        // 依存が複数、または 0 の場合は従来通りの処理
+        logger.debug(
+          `Optimization: Extracting complex interpolation for <${tag}>`
+        )
+        // 依存が複数、または 0、または Forアイテム依存の場合は従来通りの処理
         setupComplexTextInterpolation(
           qid,
           flatChildren,
@@ -98,6 +131,9 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
         )
       }
     } else {
+      logger.debug(
+        `Optimization: Extracting mixed text interpolation for <${tag}>`
+      )
       // 混合テキスト（例: "Count: {count()}"）の場合
       setupComplexTextInterpolation(
         qid,
@@ -120,6 +156,9 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
       }
       // ⭐️ 追加: 混合コンテンツ内に関数（シグナル）がある場合
       else if (typeof child === 'function') {
+        logger.debug(
+          `Wrapping isolated function child in <span display:contents>`
+        )
         // 関数を span (display:contents) で包んで再帰的に h を呼ぶ
         // これにより、この関数専用の setText 命令が生成される
         const wrapped = h('span', { style: 'display:contents' }, child)
@@ -153,7 +192,7 @@ export function h(tag: any, props: any, ...children: any[]): VNode {
  */
 function setupComplexTextInterpolation(
   qid: string,
-  flatChildren: any[],
+  flatChildren: unknown[],
   instructions: Instruction[],
   hiddenDerivedRequests: HiddenDerivedRequest[],
   processedHtml: string[]
@@ -161,18 +200,30 @@ function setupComplexTextInterpolation(
   const tmplId = generateId('hd')
   const deps = new Set<string>()
   const initialHtmlParts: string[] = []
+  const itemFns: string[] = []
+  const SLOT_MARKER = '<q-text></q-text>'
 
   const templateParts = flatChildren.map(child => {
     if (typeof child === 'function') {
-      return tracker.runWithScope(
+      const localDeps = new Set<string>()
+      const val = tracker.runWithScope(
         tmplId,
-        id => deps.add(id),
-        () => {
-          const val = child()
-          initialHtmlParts.push(String(val))
-          return `\${val}`
-        }
+        id => {
+          deps.add(id)
+          localDeps.add(id)
+        },
+        () => (child as () => unknown)()
       )
+
+      if (Array.from(localDeps).some(id => id.startsWith('for-item-'))) {
+        itemFns.push(child.toString())
+        initialHtmlParts.push(SLOT_MARKER)
+      } else {
+        initialHtmlParts.push(String(val))
+      }
+
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: code generation
+      return `\${val}`
     }
     const str = String(child)
     initialHtmlParts.push(str)
@@ -184,10 +235,15 @@ function setupComplexTextInterpolation(
     deps: Array.from(deps),
     templateBody: templateParts.join(''),
   })
+
+  const isForDep = Array.from(deps).some(id => id.startsWith('for-item-'))
+
   instructions.push({
     signalId: tmplId,
     selector: `.${qid}`,
     action: 'setText',
+    itemFns: isForDep ? itemFns : undefined,
+    context: getActiveContext(),
   })
   processedHtml.push(initialHtmlParts.join(''))
 }

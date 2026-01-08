@@ -4,6 +4,7 @@ import type { ComponentNode, DerivedNode, Instruction } from './types'
 export class ComponentContext {
   private keyMap = new Map<string, ComponentNode>()
   nodes = new Map<string, ComponentNode>()
+  propMap = new Map<string, string>()
   html: string = ''
   instructions: Instruction[] = []
 
@@ -17,25 +18,41 @@ export class ComponentContext {
     return this.instanceId ? `${id}-${this.instanceId}` : id
   }
 
-  addState(key: string, value: any) {
+  addState(key: string, value: unknown) {
     const id = this.createId('s')
-    const node: ComponentNode = { id, key, type: 'state', value }
+    const node: ComponentNode = { id, key, type: 'state', value, context: this }
     this.keyMap.set(key, node)
     this.nodes.set(id, node)
     return id
   }
 
+  // biome-ignore lint/complexity/noBannedTypes: generic function storage
   addDerived(key: string, fn: Function, deps: string[]) {
     const id = this.createId('d')
-    const node: ComponentNode = { id, key, type: 'derived', fn, deps }
+    const node: ComponentNode = {
+      id,
+      key,
+      type: 'derived',
+      fn,
+      deps,
+      context: this,
+    }
     this.keyMap.set(key, node)
     this.nodes.set(id, node)
     return id
   }
 
+  // biome-ignore lint/complexity/noBannedTypes: generic function storage
   addHandler(key: string, fn: Function, deps: string[]) {
     const id = this.createId('h')
-    const node: ComponentNode = { id, key, type: 'handler', fn, deps }
+    const node: ComponentNode = {
+      id,
+      key,
+      type: 'handler',
+      fn,
+      deps,
+      context: this,
+    }
     this.keyMap.set(key, node)
     this.nodes.set(id, node)
     return id

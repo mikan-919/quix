@@ -1,9 +1,17 @@
+import consola from 'consola'
 import { z } from 'zod'
 import { ComponentContext } from './context'
-import { getNextInstanceId, popIdContext, pushIdContext } from './id'
+import {
+  getActiveContext,
+  getNextInstanceId,
+  popIdContext,
+  pushIdContext,
+  setActiveContext,
+} from './id'
 import { tracker } from './tracker'
 import type {
   ComponentNode,
+  QuixComponent,
   Simplify,
   ToPropsSignal,
   ToReader,
@@ -11,14 +19,35 @@ import type {
   VNode,
 } from './types'
 
-export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
-  private schema?: z.ZodObject<any>
-  private states: Array<{ key: string; valueOrFn: any }> = []
-  private deriveds: Array<{ key: string; depKeys: string[]; fn: Function }> = []
-  private handlers: Array<{ key: string; depKeys: string[]; fn: Function }> = []
-  private renderFn?: (args: any) => VNode
+const logger = consola.withTag('Quix:Builder')
 
-  constructor(public name: string) {}
+// biome-ignore lint/complexity/noBannedTypes: generic params
+export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
+  // ComponentBuilder のインスタンスを JSX タグとして認めるように
+  /** @internal */
+  protected readonly _isQuixComponent = true
+  // ダミーの呼び出しシグネチャ（実際には呼び出さないが、TSを騙すため）
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: phantom type
+  private __props!: P
+
+  // biome-ignore lint/suspicious/noExplicitAny: zod schema
+  private schema?: z.ZodObject<any>
+  private states: Array<{ key: string; valueOrFn: unknown }> = []
+  // biome-ignore lint/complexity/noBannedTypes: generic function storage
+  private deriveds: Array<{ key: string; depKeys: string[]; fn: Function }> = []
+  private handlers: Array<{
+    key: string
+    depKeys: string[]
+    // biome-ignore lint/suspicious/noExplicitAny: dynamic scope and args
+    fn: (scope: any, ...args: any[]) => void
+  }> = []
+  // biome-ignore lint/suspicious/noExplicitAny: generic render
+  private renderFn?: (args: any) => VNode
+  private _analysisContext?: ComponentContext
+
+  constructor(public name: string) {
+    logger.debug(`Define Component: ${name}`)
+  }
 
   props<T extends z.ZodRawShape>(shape: T) {
     this.schema = z.object(shape)
@@ -29,6 +58,7 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
     key: K,
     valueOrFn: V | ((props: ToPropsSignal<P>) => V)
   ) {
+    logger.trace(`[${this.name}] +State: ${key}`)
     this.states.push({ key, valueOrFn })
     return this as unknown as ComponentBuilder<
       P,
@@ -47,6 +77,9 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
       }
     ) => V
   ) {
+    logger.trace(
+      `[${this.name}] +Derived: ${key} (deps: ${depKeys.join(', ')})`
+    )
     this.deriveds.push({ key, depKeys: depKeys as string[], fn })
     return this as unknown as ComponentBuilder<
       P,
@@ -56,57 +89,96 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
     >
   }
 
-  handler<K extends string, DepKeys extends (keyof (S & D))[]>(
+  handler<
+    K extends string,
+    DepKeys extends (keyof (S & D))[],
+    // ⭐️ ユーザーが書いた関数の型を F としてキャプチャ
+    // biome-ignore lint/suspicious/noExplicitAny: generic constraint
+    F extends (scope: any, ...args: any[]) => void,
+  >(
     key: K,
     depKeys: [...DepKeys],
-    fn: (
-      scope: Simplify<Pick<ToSignal<S> & ToReader<D>, DepKeys[number]>> & {
-        props: ToPropsSignal<P>
-      }
-    ) => void
+    fn: F &
+      ((
+        scope: Simplify<Pick<ToSignal<S> & ToReader<D>, DepKeys[number]>> & {
+          props: ToPropsSignal<P>
+        },
+        ...args: unknown[]
+      ) => void)
   ) {
+    logger.trace(
+      `[${this.name}] +Handler: ${key} (deps: ${depKeys.join(', ')})`
+    )
     this.handlers.push({ key, depKeys: depKeys as string[], fn })
-    return this as unknown as ComponentBuilder<
-      P,
-      S,
-      D,
-      Simplify<H & Record<K, Function>>
-    >
+    return this as unknown as ComponentBuilder<P, S, D, H & Record<K, F>>
   }
 
   render(
     fn: (args: {
-      state: ToReader<Simplify<S & D>>
-      handlers: H
+      state: ToSignal<S>
       props: ToPropsSignal<P>
+      handlers: H
     }) => VNode
-  ): ComponentContext {
+  ) {
     this.renderFn = fn
-    // ルート解析
-    const context = this.buildInstance({}, true)
-    // @ts-expect-error
-    context.__quix_builder = this
-    return context
+    // 解析用のインスタンスを先行して作成しておく
+    this._analysisContext = this.buildInstance({}, true)
+    return this as unknown as QuixComponent<P>
   }
 
-  buildInstance(inputProps: any, isRoot = false): ComponentContext {
-    // 1. Zod バリデーション用のアンラップ
-    const peekProps: any = {}
+  // SSR/Analysis 用にルートインスタンスを提供（互換性と解析のため）
+  get context(): ComponentContext {
+    if (!this._analysisContext) {
+      this._analysisContext = this.buildInstance({}, true)
+    }
+    return this._analysisContext
+  }
+
+  get instructions() {
+    return this.context.instructions
+  }
+  get html() {
+    return this.context.html
+  }
+  getNodeByKey(key: string) {
+    return this.context.getNodeByKey(key)
+  }
+  getNodeById(id: string) {
+    return this.context.getNodeById(id)
+  }
+  getAllNodes() {
+    return this.context.getAllNodes()
+  }
+
+  /**
+   * コンポーネントのインスタンスを生成して初期HTMLと命令セットを返す (SSR用)
+   */
+  buildInstance(
+    inputProps: Record<string, unknown>,
+    isRoot = false
+  ): ComponentContext {
+    const instanceId = isRoot ? '' : getNextInstanceId(this.name)
+    const context = new ComponentContext(this.name, instanceId)
+    pushIdContext(this.name)
+
+    // 1. Props の準備
+    const peekProps = {} as Record<string, unknown>
     for (const key of Object.keys(inputProps)) {
       const val = inputProps[key]
-      // バリデーションのために一時的に実行。trackerを黙らせて副作用を防ぐ
       peekProps[key] =
         typeof val === 'function' ? tracker.silence(() => val()) : val
     }
 
-    // バリデーション実行（Root時はスキップ）
+    // バリデーション実行（Root時やProbing時はスキップ）
+    const isProbing = tracker.isProbing()
     const validatedProps =
-      this.schema && !isRoot ? this.schema.parse(peekProps) : peekProps
-
-    // 2. ID コンテキスト管理
-    pushIdContext(this.name)
-    const instanceId = isRoot ? '' : getNextInstanceId(this.name)
-    const context = new ComponentContext(this.name, instanceId)
+      this.schema && !isRoot && !isProbing
+        ? this.schema.parse(peekProps)
+        : peekProps
+    // バリデーション成功ログ
+    if (this.schema && !isRoot) {
+      logger.debug(`[${this.name}] Props validated successfully.`)
+    }
 
     // 3. Props Proxy (実行時に親のシグナルを叩く)
     const propsProxy = new Proxy(
@@ -119,39 +191,68 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
       }
     ) as ToPropsSignal<P>
 
+    // ⭐️ 修正: Props のシグナル紐付けを記録 (Codegen用)
+    if (!isRoot) {
+      for (const key of Object.keys(inputProps)) {
+        const val = inputProps[key]
+        if (typeof val === 'function') {
+          const deps = new Set<string>()
+          tracker.runWithScope(
+            `prop-probe-${key}`,
+            id => deps.add(id),
+            // biome-ignore lint/suspicious/noExplicitAny: generic proxy
+            () => (propsProxy as any)[key]()
+          )
+          if (deps.size === 1) {
+            context.propMap.set(key, Array.from(deps)[0]!)
+          }
+        }
+      }
+    }
+
     // 4. ノードの先行登録（依存解決のために先にMapを埋める）
     for (const { key, valueOrFn } of this.states) {
       const val =
         typeof valueOrFn === 'function' ? valueOrFn(propsProxy) : valueOrFn
-      context.addState(key, val)
+      const id = context.addState(key, val)
+      logger.trace(`  -> Register State: ${key} (${id})`)
     }
     for (const { key, depKeys, fn } of this.deriveds) {
       const depIds = depKeys
         .map(k => context.getNodeByKey(k)?.id)
         .filter((id): id is string => !!id)
-      context.addDerived(key, fn, depIds)
+      const id = context.addDerived(key, fn, depIds)
+      logger.trace(
+        `  -> Register Derived: ${key} (${id}, deps: ${depIds.join(', ')})`
+      )
     }
     for (const { key, depKeys, fn } of this.handlers) {
       const depIds = depKeys
         .map(k => context.getNodeByKey(k)?.id)
         .filter((id): id is string => !!id)
-      context.addHandler(key, fn, depIds)
+      const id = context.addHandler(key, fn, depIds)
+      logger.trace(
+        `  -> Register Handler: ${key} (${id}, deps: ${depIds.join(', ')})`
+      )
     }
 
-    // 5. 統合 Proxy (State + Props)
-    const createScopeProxy = () => {
+    // 5. Proxy ユーティリティ
+    const createScopeProxy = (isReader = false) => {
       return new Proxy(
         {},
         {
           get: (_, key: string) => {
-            if (key === 'props') return propsProxy
             const node = context.getNodeByKey(key)
             if (!node) return undefined
+
+            // SSR解析時(isReader=false)も値を取得・実行できるように関数を返す
+            // これにより、render関数内の state.count() が動作し、h() が依存関係(node.id)を収集できる
             return () => {
-              tracker.report(node.id)
-              return tracker.silence(() =>
-                this.computeValue(context, node, propsProxy)
-              )
+              if (!isReader) tracker.report(node.id)
+              if (node.type === 'state') return (node as any).value
+              if (node.type === 'derived')
+                return this.computeValue(context, node, peekProps)
+              return undefined
             }
           },
         }
@@ -160,6 +261,7 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
 
     // 6. Render 実行
     if (this.renderFn) {
+      logger.debug(`[${this.name}] Executing render function...`)
       const scope = createScopeProxy()
       const handlersProxy = new Proxy(
         {},
@@ -171,26 +273,37 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
         }
       )
 
-      const vnode = this.renderFn({
-        state: scope as any,
-        handlers: handlersProxy as any,
-        props: propsProxy,
-      })
+      const prevActive = getActiveContext()
+      setActiveContext(context)
+      try {
+        const vnode = this.renderFn({
+          // biome-ignore lint/suspicious/noExplicitAny: proxy casting
+          state: scope as any,
+          // biome-ignore lint/suspicious/noExplicitAny: proxy casting
+          handlers: handlersProxy as any,
+          props: propsProxy,
+        })
 
-      context.html = vnode.html
-      context.instructions = vnode.instructions
-      if (vnode.additionalNodes) {
-        for (const n of vnode.additionalNodes) context.nodes.set(n.id, n)
-      }
-      if (vnode.hiddenDerivedRequests) {
-        for (const req of vnode.hiddenDerivedRequests) {
-          context.addHiddenDerived(
-            req.deps,
-            req.templateBody,
-            req.isExpression,
-            req.placeholderId
-          )
+        context.html = vnode.html
+        context.instructions = vnode.instructions
+        if (vnode.additionalNodes) {
+          for (const n of vnode.additionalNodes) context.nodes.set(n.id, n)
         }
+        if (vnode.hiddenDerivedRequests) {
+          for (const req of vnode.hiddenDerivedRequests) {
+            context.addHiddenDerived(
+              req.deps,
+              req.templateBody,
+              req.isExpression,
+              req.placeholderId
+            )
+          }
+        }
+        logger.debug(
+          `[${this.name}] Render complete. Generated ${vnode.instructions.length} instructions.`
+        )
+      } finally {
+        setActiveContext(prevActive)
       }
     }
 
@@ -201,8 +314,8 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
   private computeValue(
     ctx: ComponentContext,
     node: ComponentNode,
-    props: any
-  ): any {
+    props: Record<string, unknown>
+  ): unknown {
     if (node.type === 'state') return node.value
     if (node.type === 'derived') {
       // ⭐️ 修正: スプレッドせずに Proxy をそのまま渡す

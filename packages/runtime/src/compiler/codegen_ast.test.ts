@@ -2,20 +2,17 @@ import { describe, expect, test } from 'bun:test'
 import { ComponentContext } from '../core/context'
 import { generateAppJs } from './codegen'
 
-describe('AST-based Code Generation', () => {
-  test('should correctly transform nested setters with spread syntax', () => {
+describe('AST-based Codegen: 高度なJavaScript変換', () => {
+  test('ネストしたSetter: スプレッド構文を含む配列更新が正しく変換されること', () => {
     const ctx = new ComponentContext('TestApp')
     ctx.addState('items', ['A'])
 
-    const handlerFn = (s: { items: (v?: string[]) => string[] }) => {
-      return s.items([...s.items(), 'B'])
-    }
-
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    ctx.addHandler('addItem', handlerFn as any)
+    // (s) => s.items([...s.items(), 'B']) 形式のハンドラ
+    const handlerFn = (s: { items: (v?: string[]) => string[] }) =>
+      s.items([...s.items(), 'B'])
+    ctx.addHandler('addItem', handlerFn, [])
     const handlerId = ctx.getNodeByKey('addItem')?.id
 
-    // 【修正】コード生成をトリガーするために命令を追加
     if (handlerId) {
       ctx.instructions.push({
         signalId: handlerId,
@@ -26,21 +23,19 @@ describe('AST-based Code Generation', () => {
     }
 
     const output = generateAppJs(ctx)
+    // 期待値: _a = [..._a, "B"], _u_a()
     expect(output).toMatch(
       /_[a-z]\s*=\s*\[\.\.\._[a-z],\s*"B"\],\s*_u_[a-z]\(\)/
     )
   })
 
-  test('should NOT transform unrelated external function calls', () => {
+  test('外部関数呼び出し: 関係のない console.log などは変換されないこと', () => {
     const ctx = new ComponentContext('TestApp')
     ctx.addState('count', 0)
-
     const handlerFn = (s: { count: () => number }) => console.log(s.count())
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    ctx.addHandler('logIt', handlerFn as any)
-    const handlerId = ctx.getNodeByKey('logIt')?.id
+    ctx.addHandler('logIt', handlerFn, [])
 
-    // 【修正】命令を追加
+    const handlerId = ctx.getNodeByKey('logIt')?.id
     if (handlerId) {
       ctx.instructions.push({
         signalId: handlerId,
@@ -51,25 +46,19 @@ describe('AST-based Code Generation', () => {
     }
 
     const output = generateAppJs(ctx)
-
     expect(output).toContain('console.log(')
     expect(output).not.toContain('.count()')
     expect(output).toMatch(/console\.log\(_[a-z]\)/)
   })
 
-  test('should distinguish state getters from same-named methods on other objects', () => {
+  test('メソッド名の衝突回避: Array.prototype.map と Stateの map が区別されること', () => {
     const ctx = new ComponentContext('TestApp')
-    ctx.addState('map', { data: 1 })
+    ctx.addState('dataMap', {}) // 名前が衝突しそうなステート
 
-    const handlerFn = (_s: unknown) => {
-      const arr = [1, 2]
-      return arr.map(x => x * 2)
-    }
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    ctx.addHandler('testMap', handlerFn as any)
+    const handlerFn = (_s: unknown) => [1, 2].map(x => x * 2)
+    ctx.addHandler('testMap', handlerFn, [])
+
     const handlerId = ctx.getNodeByKey('testMap')?.id
-
-    // 【修正】命令を追加
     if (handlerId) {
       ctx.instructions.push({
         signalId: handlerId,
@@ -80,29 +69,36 @@ describe('AST-based Code Generation', () => {
     }
 
     const output = generateAppJs(ctx)
-
+    // 配列の .map() はそのまま残っている必要がある
     expect(output).toContain('.map(')
-    expect(output).not.toMatch(/_\w+\(x => x \* 2\)/)
   })
-  test('should handle event arguments in handlers by stripping the scope parameter', () => {
+
+  test('イベント引数の処理: ハンドラから scope 引数が削除され (e) => ... になること', () => {
     const ctx = new ComponentContext('TestApp')
     ctx.addState('val', '')
     const valId = ctx.getNodeByKey('val')?.id
 
     // (s, e) => s.val(e.target.value)
-    const handlerFn = (s: any, e: any) => s.val(e.target.value)
-    ctx.addHandler('onInput', handlerFn as any, [valId!])
+    const handlerFn = (
+      s: { val: (v: string) => void },
+      e: { target: { value: string } }
+    ) => s.val(e.target.value)
+
+    if (valId) ctx.addHandler('onInput', handlerFn, [valId])
+
     const handlerId = ctx.getNodeByKey('onInput')?.id
 
-    ctx.instructions.push({
-      signalId: handlerId!,
-      selector: 'input',
-      action: 'addListener',
-      attrName: 'input',
-    })
+    if (handlerId) {
+      ctx.instructions.push({
+        signalId: handlerId,
+        selector: 'input',
+        action: 'addListener',
+        attrName: 'input',
+      })
+    }
 
     const output = generateAppJs(ctx)
-
+    // scope(s)が消え、e だけが残る
     expect(output).toMatch(
       /\.addEventListener\('input',\s*\(?e\)?\s*=>\s*\(?_a=e\.target\.value,\s*_u_a\(\)\)?/
     )

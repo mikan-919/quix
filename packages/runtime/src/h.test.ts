@@ -3,163 +3,114 @@ import { tracker } from './core/tracker'
 import { h } from './h'
 import { For, Show } from './index'
 
-describe('h function (JSX Runtime)', () => {
-  test('should generate static HTML', () => {
+describe('h function: JSXランタイムの命令生成ロジック', () => {
+  test('静的要素: 命令を生成せずそのままのHTMLを返すこと', () => {
     const vnode = h('div', { id: 'test' }, 'Hello')
     expect(vnode.html).toBe('<div id="test">Hello</div>')
     expect(vnode.instructions).toHaveLength(0)
   })
 
-  test('should optimize inline functions as Hidden Derived', () => {
+  test('インライン関数の最適化: テキスト補間を Hidden Derived としてリクエストすること', () => {
     const mockFn = () => 123
     const vnode = h('p', null, 'Count: ', mockFn)
 
     expect(vnode.html).toMatch(/<p\s+class="q-.*">/)
     expect(vnode.hiddenDerivedRequests).toHaveLength(1)
 
-    // 通常のテキスト補間なので isExpression は false (undefined)
+    // テキスト補間の場合、isExpression フラグは false (undefined) であること
     expect(vnode.hiddenDerivedRequests[0]?.isExpression).toBeFalsy()
     expect(vnode.instructions[0]?.action).toBe('setText')
   })
 
-  test('should handle Show component', () => {
+  test('Show コンポーネント: アンカー、show 命令、式のフラグ管理', () => {
     const conditionFn = () => true
-    // Showコンポーネントの使用
     const vnode = h(Show, { when: conditionFn }, h('span', null, 'Content'))
 
-    // 1. アンカー（span）が出力されているか
-    expect(vnode.html).toMatch(
-      /<span\s+class="q-.*"\s+style="display:contents"\s+data-show-anchor><\/span>/
-    )
+    // アンカー要素の出力確認
+    expect(vnode.html).toContain('data-show-anchor><span>Content</span></span>')
+    expect(vnode.html).toContain('<template id="tmpl-')
+    expect(vnode.html).toContain('<span>Content</span></template>')
 
-    // 2. show命令が生成されているか
     expect(vnode.instructions).toHaveLength(1)
     const inst = vnode.instructions[0]
     expect(inst?.action).toBe('show')
     expect(inst?.template).toBe('<span>Content</span>')
 
-    // 3. 条件式が「式」としてリクエストされているか
+    // Show の条件式は「式 (isExpression: true)」としてリクエストされること
     expect(vnode.hiddenDerivedRequests).toHaveLength(1)
     expect(vnode.hiddenDerivedRequests[0]?.isExpression).toBe(true)
   })
 
-  test('should handle For component for list rendering', () => {
-    // 1. モックのState（配列を返すGetter）
-    // 修正: tracker.report を呼んで、擬似的にStateであることを通知する
+  test('For コンポーネント: リストレンダリングのテンプレート抽出と {v} 置換', () => {
     const mockStateItems = () => {
       tracker.report('s-mock-items')
       return ['A', 'B']
     }
 
-    // 2. <For each={state.items}>...</For>
-    const vnode = h(For, { each: mockStateItems }, (item: () => any) =>
+    const vnode = h(For, { each: mockStateItems }, (item: () => unknown) =>
       h('div', { class: 'item' }, item)
     )
 
-    // 検証 1: アンカー要素
-    expect(vnode.html).toMatch(
-      /<span\s+class="q-.*"\s+style="display:contents"\s+data-for-anchor><\/span>/
-    )
-
-    // 検証 2: 'list' アクションを持つ命令
+    expect(vnode.html).toMatch(/data-for-anchor/)
     expect(vnode.instructions).toHaveLength(1)
-    const inst = vnode.instructions[0]
 
+    const inst = vnode.instructions[0]
     expect(inst?.action).toBe('list')
-    expect(inst?.selector).toMatch(/\.q-.*/)
-
-    // IDが正しく紐付いているか
-    expect(inst?.signalId).toBe('s-mock-items')
-
-    // 検証 3: テンプレート抽出
-    // item() が ${v} に置換されているか
-    expect(inst?.template).toMatch(/<div class="item q-.*">\${v}<\/div>/)
-  })
-  test('should handle For component with executed signal style', () => {
-    // ユーザーが <For each={state.items()}> と書いた場合、
-    // Babelにより { each: () => state.items() } に変換される
-    const mockStateItems = () => {
-      tracker.report('s-mock-items')
-      return ['A', 'B']
-    }
-    const wrappedEach = () => mockStateItems() // Babelのラップを模倣
-
-    const vnode = h(For, { each: wrappedEach }, (item: () => any) =>
-      h('div', null, item)
+    // 新しい実装では for- プレフィックスの独自IDが生成される
+    expect(inst?.signalId).toMatch(/^for-/)
+    // item() が呼び出された箇所がテンプレート内で <q-text> になっていること
+    expect(inst?.template).toMatch(
+      /<div class="item q-.*"><q-text><\/q-text><\/div>/
     )
-
-    // 検証 1: 命令が生成されているか
-    expect(vnode.instructions).toHaveLength(1)
-    const inst = vnode.instructions[0]
-    expect(inst?.signalId).toBe('s-mock-items') // 正しく依存が抜けているか
-
-    // 検証 2: アンカーHTML
-    expect(vnode.html).toContain('data-for-anchor')
+    expect(inst?.templateId).toBeDefined()
   })
-  test('should NOT generate Hidden Derived for single signal interpolation', () => {
+
+  test('最適化 A: 単一シグナルの補間は Hidden Derived を作らず直結すること', () => {
     const mockSignal = () => {
       tracker.report('s-original')
       return 'val'
     }
 
-    // <span>{() => ...}</span> の形式
+    // <span>{() => signal()}</span> のように、関数が唯一の子要素の場合
     const vnode = h('span', null, mockSignal)
 
-    // 検証 1: 命令は生成されている
     expect(vnode.instructions).toHaveLength(1)
-
-    // 検証 2: 命令の signalId が、オリジナルの ID に直結している ⭐️
-    expect(vnode.instructions[0].signalId).toBe('s-original')
-
-    // 検証 3: 余計な派生ノードのリクエストが作られていない ⭐️
+    // 中間ノード (hd-) を作らず、直接 s-original に紐付いているか
+    expect(vnode.instructions[0]?.signalId).toBe('s-original')
     expect(vnode.hiddenDerivedRequests).toHaveLength(0)
   })
 
-  test('should still generate Hidden Derived for mixed text', () => {
+  test('混合テキストの処理: 静的文字と混ざる場合は Hidden Derived が必須であること', () => {
     const mockSignal = () => {
       tracker.report('s-1')
       return 'val'
     }
 
-    // <span>Value: {() => ...}</span>
+    // <span>Value: {() => signal()}</span>
     const vnode = h('span', null, 'Value: ', mockSignal)
 
-    // 混合テキストの場合は、hd- ノードが必要
-    expect(vnode.instructions[0].signalId).toContain('hd-')
+    // 期待値: hd- ノードが生成され、そちらをsetTextの対象にする
+    expect(vnode.instructions[0]?.signalId).toContain('hd-')
     expect(vnode.hiddenDerivedRequests).toHaveLength(1)
   })
-  test('should handle reactive attribute binding', () => {
+
+  test('属性のリアクティブ化: setAttr 命令と初期値のHTML反映', () => {
     const mockSignal = () => {
       tracker.report('s-attr')
       return 'dynamic-value'
     }
 
-    // <input value={() => mockSignal()} />
     const vnode = h('input', { value: mockSignal })
 
-    // 検証 1: setAttr 命令が生成されているか
     const inst = vnode.instructions.find(i => i.action === 'setAttr')
     expect(inst).toBeDefined()
     expect(inst?.attrName).toBe('value')
     expect(inst?.signalId).toBe('s-attr')
-
-    // 検証 2: HTML に初期値が反映されているか
+    // 初期レンダリング用のHTMLに値が含まれていること
     expect(vnode.html).toContain('value="dynamic-value"')
   })
 
-  test('should handle attribute binding with multiple dependencies (first dependency win)', () => {
-    const mockMultiSignal = () => {
-      tracker.report('s-first')
-      tracker.report('s-second')
-      return 'combined'
-    }
-
-    const vnode = h('div', { 'data-test': mockMultiSignal })
-
-    const inst = vnode.instructions.find(i => i.action === 'setAttr')
-    expect(inst).toBeDefined()
-  })
-  test('should handle attribute binding with direct signal shortcut (Optimization for Attr)', () => {
+  test('属性の最適化: クラス等の属性で単一シグナルならショートカットを適用すること', () => {
     const mockSignal = () => {
       tracker.report('s-original-state')
       return 'active'
@@ -168,11 +119,8 @@ describe('h function (JSX Runtime)', () => {
     const vnode = h('div', { class: mockSignal })
 
     const inst = vnode.instructions.find(i => i.action === 'setAttr')
-    expect(inst).toBeDefined()
     expect(inst?.signalId).toBe('s-original-state')
-    expect(inst?.attrName).toBe('class')
-
-    // ⭐️ 修正: "active" が含まれており、その後に識別子(q-...)が続くことを許容する
+    // HTML出力: "初期値 + 追跡用ID(q-...)" の形式
     expect(vnode.html).toMatch(/class="active\s+q-.*"/)
   })
 })

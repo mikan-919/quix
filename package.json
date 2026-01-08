@@ -5,10 +5,14 @@
     "playground"
   ],
   "scripts": {
-    "dev": "bun --filter playground dev"
+    "dev": "bun --filter playground dev",
+    "build": "bun --filter './packages/transform' build",
+    "check-all": "biome check --write && bun test",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "husky": "^9.1.7",
     "typescript": "^5"
   },
   "dependencies": {
