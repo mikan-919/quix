@@ -1,12 +1,84 @@
 import type z from 'zod'
 
+export type WireType = 'text' | 'attr' | 'handler' | 'show' | 'list'
+
+export interface Wire {
+  type: WireType
+  from: string
+  target: string
+  property?: string
+  fragmentId?: string
+}
+
+export interface Fragment {
+  id: string
+  html: string
+  wires: Wire[]
+}
+
+export interface HResult {
+  html: string
+  wires: Wire[]
+  hidden: Record<string, HiddenDerived>
+  fragments: Fragment[]
+  listData?: {
+    itemKey: string
+    itemDeps: string[]
+    itemFns: string[]
+  }
+}
+
+export interface HiddenDerived {
+  valueFn: Function
+  deps: string[]
+  _rawLogic?: string
+}
+
+export type Simplify<T> = { [K in keyof T]: T[K] } & {}
+
+export type ToReader<T> = { [K in keyof T]-?: () => T[K] }
+
+export type Signal<V> = (update?: V) => V
+
+export type ToSignal<T> = { [K in keyof T]: Signal<T[K]> }
+export type ToPropsSignal<T> = {
+  [K in keyof T]: () => T[K]
+}
+
+export interface DeriveDefinition {
+  valueFn: (state: unknown) => unknown
+  deps: string[]
+  _rawLogic?: string
+}
+
+export interface HandlerDefinition {
+  valueFn: (state: unknown, event: unknown) => void
+  deps: string[]
+}
+
+export interface ExtendedHResult extends HResult {
+  nestedState?: Record<string, unknown>
+  nestedDerive?: Record<string, DeriveDefinition>
+}
+
+export type Scope<STATE, DERIVE, PROPS> = {
+  state: { [K in keyof (STATE & DERIVE)]: Signal<(STATE & DERIVE)[K]> }
+  props: { [K in keyof PROPS]: () => PROPS[K] }
+  handlers: { [K in string]: string }
+}
+
+export type QuixComponent<P = unknown> = {
+  name: string
+  __quix_builder?: unknown
+  render?: (props: P) => HResult
+}
+
 export type NodeType = 'state' | 'derived' | 'handler'
 
 export interface NodeBase {
   id: string
   key: string
   type: NodeType
-  // biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency with ComponentContext
   context?: any
 }
 
@@ -17,7 +89,6 @@ export interface StateNode extends NodeBase {
 
 export interface DerivedNode extends NodeBase {
   type: 'derived'
-  // biome-ignore lint/complexity/noBannedTypes: generic function
   fn: Function
   deps: string[]
   templateBody?: string
@@ -26,13 +97,11 @@ export interface DerivedNode extends NodeBase {
 
 export interface HandlerNode extends NodeBase {
   type: 'handler'
-  // biome-ignore lint/complexity/noBannedTypes: generic function
-  fn: Function // ここは内部的にはFunctionだが、Builder上では厳密な型をつける
+  fn: Function
   deps: string[]
 }
 
 export interface VNode {
-  // biome-ignore lint/complexity/noBannedTypes: generic function
   tag: string | Function | unknown
   html: string
   instructions: Instruction[]
@@ -49,11 +118,10 @@ export interface Instruction {
   attrName?: string
   template?: string
   templateId?: string
-  listFn?: string // For用: each関数の文字列表現
-  itemSlots?: string[] // For用: 各q-textスロットを更新するための関数の配列表現
-  itemFns?: string[] // For用: テキストノード内の各動的分を更新するための関数の文字列表現リスト
-  itemInstructions?: Instruction[] // For用: 各アイテム内で実行される命令
-  // biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency
+  listFn?: string
+  itemSlots?: string[]
+  itemFns?: string[]
+  itemInstructions?: Instruction[]
   context?: any
 }
 
@@ -64,46 +132,13 @@ export interface HiddenDerivedRequest {
   isExpression?: boolean
 }
 
-// ⬇️ ここから追加: 型推論用ユーティリティ
-
-// 交差型を綺麗に畳み込む（ツールチップで見やすくする）
-export type Simplify<T> = { [K in keyof T]: T[K] } & {}
-
-// Getter専用: Derived内での状態アクセス用
-// { count: number } -> { count: () => number }
-export type ToReader<T> = { [K in keyof T]: () => T[K] }
-
-// Signal (Getter/Setter両用): Handler内での状態アクセス用
-// value() で取得、value(newVal) で更新
-export type Signal<V> = {
-  (): V
-  (newValue: V): void
-}
-
-// { count: number } -> { count: Signal<number> }
-export type ToSignal<T> = { [K in keyof T]: Signal<T[K]> }
-export type ToPropsSignal<T> = {
-  [K in keyof T]: () => T[K]
-}
-
-// ⭐️ Builder の内部状態用の型
 export interface ComponentMetadata {
   name: string
-  // biome-ignore lint/suspicious/noExplicitAny: zod schema
   propsSchema?: z.ZodObject<any>
-  // ロジックを保持しておき、親の render 時に再実行できるようにする
   setupFns: {
     state: Array<{ key: string; valueOrFn: unknown }>
-    // biome-ignore lint/complexity/noBannedTypes: generic function
     derived: Array<{ key: string; depKeys: string[]; fn: Function }>
-    // biome-ignore lint/complexity/noBannedTypes: generic function
     handler: Array<{ key: string; depKeys: string[]; fn: Function }>
-
     render?: (args: Record<string, unknown>) => VNode
   }
 }
-export type QuixComponent<P = unknown> =
-  import('./context').ComponentContext & {
-    (props: P): VNode
-    __quix_builder?: unknown // 内部用
-  }
