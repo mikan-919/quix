@@ -4,7 +4,7 @@ export default defineConfig({
   // テストファイルの場所
   testDir: './packages/runtime/test/playwright',
 
-  // .spec.ts ファイルのみをテストとして認識
+  // Playwrightのデフォルト設定: .spec.tsファイルのみをテストとして認識
   testMatch: '**/*.spec.ts',
 
   // 並列実行を有効化
