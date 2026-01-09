@@ -5,6 +5,7 @@
 
 ### 1. ブランチを切る
 - `git switch -c agent/<disposable-branch-name>` // This does not require approval
+- **devブランチに直接コミットしてはいけない。必ず切っておいたブランチにコミットする。もし無いのならば先の指示の通りにブランチを作成する。**
 
 ### 2. タスクの目標を明確に説明し、要件を定義する
 - Implementation PlanとTaskは日本語で記述し、エッジケース、内部実装の理想の状態を記述する。
