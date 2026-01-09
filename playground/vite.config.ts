@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     quixPlugin(),
     compression({
-      algorithms: ['gzip', 'brotli', 'zstd'],
+      algorithms: ['gzip', 'brotli'],
     }),
   ],
   esbuild: {
