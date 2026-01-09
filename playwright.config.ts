@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   // テストファイルの場所
-  testDir: './packages/runtime/test/playwright',
+  testDir: './e2e',
 
   // Playwrightのデフォルト設定: .spec.tsファイルのみをテストとして認識
   testMatch: '**/*.spec.ts',

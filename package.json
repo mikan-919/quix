@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "bun --filter playground dev",
     "build": "bun --filter './packages/transform' build",
-    "check-all": "biome check --write && bun test --test-name-pattern '^(?!.*test\\/playwright).*\\.test\\.ts$' && bunx playwright test",
+    "check-all": "biome check --write && bun test && bunx playwright test",
     "prepare": "husky",
     "test:e2e": "bunx playwright test",
     "lint-staged": "lint-staged"
@@ -27,8 +27,10 @@
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
-      "biome check --write",
-      "bun test --test-name-pattern '^(?!.*test\\/playwright).*\\.test\\.ts$'"
+      "biome check --write"
+    ],
+    "packages/**/*.{test,spec}.{ts,tsx,js,jsx}": [
+      "bun test"
     ]
   }
 }
