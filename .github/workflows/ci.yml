@@ -23,6 +23,15 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-wasip1
+
+      - name: Build wasm
+        run: bun run build
+
       - name: Run Biome check
         run: bunx biome check --write
 
