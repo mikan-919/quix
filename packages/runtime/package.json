@@ -5,11 +5,17 @@
   "private": true,
   "main": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./compiler": "./src/compiler/codegen.ts"
+    ".": {
+      "import": "./src/index.ts"
+    },
+    "./compiler": {
+      "import": "./dist/compiler/codegen.js",
+      "types": "./dist/compiler/codegen.d.ts"
+    }
   },
   "scripts": {
-    "dev": "bun --bun ./src/demo.ts --hot --watch"
+    "dev": "bun --bun ./src/demo.ts --hot --watch",
+    "build:compiler": "tsc -p tsconfig.compiler.json"
   },
   "devDependencies": {
     "@babel/generator": "^7.28.5",
