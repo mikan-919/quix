@@ -6,7 +6,7 @@
   ],
   "scripts": {
     "dev": "bun --filter playground dev",
-    "build": "bun --filter './packages/transform' build",
+    "build": "bun --filter './packages/transform' build && bun --filter './packages/vite-plugin' build",
     "check-all": "biome check --write && bun test && bunx playwright test",
     "prepare": "husky",
     "test:e2e": "bunx playwright test",
