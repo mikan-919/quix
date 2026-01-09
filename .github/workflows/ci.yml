@@ -27,7 +27,7 @@ jobs:
         run: bunx biome check --write
 
       - name: Run unit tests
-        run: bun test --test-name-pattern '^(?!.*test\/playwright).*\.test\.ts$'
+        run: bun test
 
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps
