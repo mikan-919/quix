@@ -71,6 +71,12 @@ jobs:
       - name: Run unit tests
         run: bun test
 
+      - name: Start dev server in background
+        run: |
+          bun --filter playground dev &
+          DEV_SERVER_PID=$!
+          echo "DEV_SERVER_PID=$DEV_SERVER_PID" >> $GITHUB_ENV
+
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
@@ -86,3 +92,15 @@ jobs:
 
       - name: Run E2E tests
         run: bun test:e2e
+        env:
+          DEV_SERVER_PID: ${{ steps.start-dev-server.outputs.DEV_SERVER_PID }}
+
+      - name: Stop dev server
+        if: always()
+        run: |
+          if [ -f "$GITHUB_ENV" ]; then
+            source "$GITHUB_ENV"
+            if [ -n "$DEV_SERVER_PID" ]; then
+              kill $DEV_SERVER_PID || true
+            fi
+          fi
