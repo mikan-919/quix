@@ -30,6 +30,9 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install Rust toolchain
+        run: rustup target add wasm32-wasip1
+
       - name: Cache Bun
         uses: actions/cache@v4
         with:
