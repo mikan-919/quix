@@ -13,17 +13,6 @@ const App = component('App')
   .handler('toggleModal', ['modalOpen'], s => s.modalOpen(!s.modalOpen()))
   .render(({ state, handlers }) => {
     const doubleValue = state.count() * 2
-    const modalContent = state.modalOpen() ? (
-      <div style='background:white;padding:2rem;border-radius:8px;max-width:400px;'>
-        <h2>Modal Title</h2>
-        <p>This modal is used for E2E testing.</p>
-      </div>
-    ) : (
-      <div style='display:none;' data-testid='modal-content'>
-        <h2>Modal Title</h2>
-        <p>This modal is used for E2E testing.</p>
-      </div>
-    )
 
     return (
       <div>
@@ -32,9 +21,21 @@ const App = component('App')
           Count is: {state.count()}
         </button>
         <Display value={doubleValue} />
-        <div data-testid='modal-backdrop' onclick={handlers.toggleModal}>
-          <div data-testid='modal-content'>{modalContent}</div>
-        </div>
+        {state.modalOpen() ? (
+          <div
+            onclick={handlers.toggleModal}
+            style='position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;'
+            data-testid='modal-backdrop'
+          >
+            <div
+              style='background:white;padding:2rem;border-radius:8px;max-width:400px;'
+              data-testid='modal-content'
+            >
+              <h2 style='margin:0 0 1rem 0;'>Modal Title</h2>
+              <p>This modal is used for E2E testing.</p>
+            </div>
+          </div>
+        ) : null}
         <button
           type='button'
           onclick={handlers.toggleModal}
