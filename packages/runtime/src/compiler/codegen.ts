@@ -234,7 +234,23 @@ export function generateAppJs(context: ComponentContext) {
           return `    _e${idx} = root.${method}('${sel}');`
         })
         .join('\n')
-      return `  function _u_rebind_${tId}() {\n${rebindBody}\n  }`
+      // Re-attach event listeners for addListener instructions inside this template
+      const eventRebindBody = instructions
+        .filter(
+          i =>
+            i.action === 'addListener' &&
+            si.template?.includes(i.selector?.replace(/^\./, ''))
+        )
+        .map(i => {
+          const handlerNode = context.getNodeById(i.signalId)
+          if (!handlerNode || handlerNode.type !== 'handler') return ''
+          let body = handlerNode.fn.toString()
+          body = transformCode(body, context, idToShort)
+          const idx = selectors.indexOf(i.selector)
+          return `    if(_e${idx}) _e${idx}.addEventListener('${i.attrName}', ${body});`
+        })
+        .join('\n')
+      return `  function _u_rebind_${tId}() {\n${rebindBody}\n${eventRebindBody}\n  }`
     })
     .join('\n')
 
