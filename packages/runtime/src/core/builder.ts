@@ -13,6 +13,7 @@ import type {
   ComponentNode,
   QuixComponent,
   Simplify,
+  StateNode,
   ToPropsSignal,
   ToReader,
   ToSignal,
@@ -200,11 +201,18 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
           tracker.runWithScope(
             `prop-probe-${key}`,
             id => deps.add(id),
-            // biome-ignore lint/suspicious/noExplicitAny: generic proxy
-            () => (propsProxy as any)[key]()
+            () => {
+              const getter = (
+                propsProxy as Record<string, (() => unknown) | undefined>
+              )[key]
+              return getter ? getter() : undefined
+            }
           )
           if (deps.size === 1) {
-            context.propMap.set(key, Array.from(deps)[0]!)
+            const dep = Array.from(deps)[0]
+            if (dep) {
+              context.propMap.set(key, dep)
+            }
           }
         }
       }
@@ -249,7 +257,10 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
             // これにより、render関数内の state.count() が動作し、h() が依存関係(node.id)を収集できる
             return () => {
               if (!isReader) tracker.report(node.id)
-              if (node.type === 'state') return (node as any).value
+              if (node.type === 'state') {
+                const stateNode = node as StateNode
+                return stateNode.value
+              }
               if (node.type === 'derived')
                 return this.computeValue(context, node, peekProps)
               return undefined
@@ -277,10 +288,10 @@ export class ComponentBuilder<P = {}, S = {}, D = {}, H = {}> {
       setActiveContext(context)
       try {
         const vnode = this.renderFn({
-          // biome-ignore lint/suspicious/noExplicitAny: proxy casting
-          state: scope as any,
-          // biome-ignore lint/suspicious/noExplicitAny: proxy casting
-          handlers: handlersProxy as any,
+          state: scope as ToReader<Simplify<S & D>> & {
+            props: ToPropsSignal<P>
+          },
+          handlers: handlersProxy as H,
           props: propsProxy,
         })
 

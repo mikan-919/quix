@@ -60,8 +60,10 @@ export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
         )
 
         if (deps.size > 0) {
-          // biome-ignore lint/style/noNonNullAssertion: checked
-          const signalId = Array.from(deps)[0]! // 最初の依存ノードに紐付け
+          const signalId = Array.from(deps)[0]
+          if (!signalId) {
+            throw new Error(`No signal ID found for prop ${k}`)
+          }
           instructions.push({
             signalId,
             selector: `.${qid}`,
@@ -104,8 +106,10 @@ export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
 
       // 依存している変数が 1 つだけなら、直接その ID を使う (Shortcut!)
       if (deps.size === 1 && !isItemDep) {
-        // biome-ignore lint/style/noNonNullAssertion: checked
-        const signalId = Array.from(deps)[0]!
+        const signalId = Array.from(deps)[0]
+        if (!signalId) {
+          throw new Error('No signal ID found in dependencies')
+        }
         instructions.push({
           signalId,
           selector: `.${qid}`,
@@ -222,8 +226,7 @@ function setupComplexTextInterpolation(
         initialHtmlParts.push(String(val))
       }
 
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: code generation
-      return `\${val}`
+      return '$' + '{val}'
     }
     const str = String(child)
     initialHtmlParts.push(str)

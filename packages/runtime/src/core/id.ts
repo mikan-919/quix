@@ -1,3 +1,7 @@
+import consola from 'consola'
+
+const logger = consola.withTag('Quix:Runtime')
+
 let stack: { name: string; counter: number }[] = []
 const instanceCounters = new Map<string, number>()
 
@@ -16,6 +20,11 @@ export function getNextInstanceId(name: string) {
 }
 
 export function generateId(prefix = 'q') {
+  if (stack.length === 0) {
+    logger.warn(
+      'generateId() called without pushIdContext(). Using fallback "unknown" context.'
+    )
+  }
   const current = stack[stack.length - 1]
   const name = current ? current.name : 'unknown'
   const index = (current ? current.counter++ : 0).toString(36)
@@ -26,11 +35,9 @@ export function resetIdGenerator(name: string) {
   stack = [{ name: name.replace(/[^a-zA-Z0-9-_]/g, ''), counter: 0 }]
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency
-let activeContext: any = null
+let activeContext: unknown = null
 
-// biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency
-export function setActiveContext(ctx: any) {
+export function setActiveContext(ctx: unknown) {
   activeContext = ctx
 }
 

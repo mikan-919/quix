@@ -26,14 +26,13 @@ export class ComponentContext {
     return id
   }
 
-  // biome-ignore lint/complexity/noBannedTypes: generic function storage
-  addDerived(key: string, fn: Function, deps: string[]) {
+  addDerived(key: string, fn: unknown, deps: string[]) {
     const id = this.createId('d')
     const node: ComponentNode = {
       id,
       key,
       type: 'derived',
-      fn,
+      fn: fn as (...args: unknown[]) => unknown,
       deps,
       context: this,
     }
@@ -42,14 +41,13 @@ export class ComponentContext {
     return id
   }
 
-  // biome-ignore lint/complexity/noBannedTypes: generic function storage
-  addHandler(key: string, fn: Function, deps: string[]) {
+  addHandler(key: string, fn: unknown, deps: string[]) {
     const id = this.createId('h')
     const node: ComponentNode = {
       id,
       key,
       type: 'handler',
-      fn,
+      fn: fn as (...args: unknown[]) => void,
       deps,
       context: this,
     }

@@ -6,8 +6,7 @@ export interface NodeBase {
   id: string
   key: string
   type: NodeType
-  // biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency with ComponentContext
-  context?: any
+  context?: unknown
 }
 
 export interface StateNode extends NodeBase {
@@ -17,8 +16,7 @@ export interface StateNode extends NodeBase {
 
 export interface DerivedNode extends NodeBase {
   type: 'derived'
-  // biome-ignore lint/complexity/noBannedTypes: generic function
-  fn: Function
+  fn: (...args: unknown[]) => unknown
   deps: string[]
   templateBody?: string
   isExpression?: boolean
@@ -26,14 +24,12 @@ export interface DerivedNode extends NodeBase {
 
 export interface HandlerNode extends NodeBase {
   type: 'handler'
-  // biome-ignore lint/complexity/noBannedTypes: generic function
-  fn: Function // ここは内部的にはFunctionだが、Builder上では厳密な型をつける
+  fn: (...args: unknown[]) => void // Internal function storage, Builder provides stricter typing
   deps: string[]
 }
 
 export interface VNode {
-  // biome-ignore lint/complexity/noBannedTypes: generic function
-  tag: string | Function | unknown
+  tag: string | ((...args: unknown[]) => unknown) | unknown
   html: string
   instructions: Instruction[]
   hiddenDerivedRequests: HiddenDerivedRequest[]
@@ -53,8 +49,7 @@ export interface Instruction {
   itemSlots?: string[] // For用: 各q-textスロットを更新するための関数の配列表現
   itemFns?: string[] // For用: テキストノード内の各動的分を更新するための関数の文字列表現リスト
   itemInstructions?: Instruction[] // For用: 各アイテム内で実行される命令
-  // biome-ignore lint/suspicious/noExplicitAny: avoid circular dependency
-  context?: any
+  context?: unknown
 }
 
 export interface HiddenDerivedRequest {
@@ -89,15 +84,20 @@ export type ToPropsSignal<T> = {
 // ⭐️ Builder の内部状態用の型
 export interface ComponentMetadata {
   name: string
-  // biome-ignore lint/suspicious/noExplicitAny: zod schema
-  propsSchema?: z.ZodObject<any>
+  propsSchema?: z.ZodObject<z.ZodRawShape>
   // ロジックを保持しておき、親の render 時に再実行できるようにする
   setupFns: {
     state: Array<{ key: string; valueOrFn: unknown }>
-    // biome-ignore lint/complexity/noBannedTypes: generic function
-    derived: Array<{ key: string; depKeys: string[]; fn: Function }>
-    // biome-ignore lint/complexity/noBannedTypes: generic function
-    handler: Array<{ key: string; depKeys: string[]; fn: Function }>
+    derived: Array<{
+      key: string
+      depKeys: string[]
+      fn: (...args: unknown[]) => unknown
+    }>
+    handler: Array<{
+      key: string
+      depKeys: string[]
+      fn: (...args: unknown[]) => void
+    }>
 
     render?: (args: Record<string, unknown>) => VNode
   }

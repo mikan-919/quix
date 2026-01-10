@@ -1,14 +1,16 @@
 import _generate from '@babel/generator'
 import { parse } from '@babel/parser'
+import type { NodePath } from '@babel/traverse'
 import _traverse from '@babel/traverse'
 import * as t from '@babel/types'
 import consola from 'consola'
 import type { ComponentContext } from '../core/context'
-import type { DerivedNode } from '../core/types'
+import type { DerivedNode, StateNode } from '../core/types'
 
-// biome-ignore lint/suspicious/noExplicitAny: module interop
+const logger = consola.withTag('Quix:Codegen')
+
+// Handle ESM/CJS interop for Babel modules
 const traverse = (_traverse as any).default || _traverse
-// biome-ignore lint/suspicious/noExplicitAny: module interop
 const generate = (_generate as any).default || _generate
 
 // AST変換関数 (transformCode) は変更なし
@@ -22,7 +24,7 @@ function transformCode(
     const ast = parse(code, {
       sourceType: 'module',
       plugins: ['typescript', 'jsx'],
-    }) as any
+    })
 
     let stateScope = 'state'
     let propsScope = 'props'
@@ -60,8 +62,7 @@ function transformCode(
     }
 
     traverse(ast, {
-      // biome-ignore lint/suspicious/noExplicitAny: babel types
-      CallExpression(innerPath: any) {
+      CallExpression(innerPath: NodePath<t.CallExpression>) {
         const callee = innerPath.node.callee
 
         // 1. 直出しの呼び出し: item() -> item
@@ -121,8 +122,7 @@ function transformCode(
               const assignment = t.assignmentExpression(
                 '=',
                 t.identifier(shortName),
-                // biome-ignore lint/suspicious/noExplicitAny: ast node
-                args[0] as any
+                args[0] as t.Expression
               )
               const updateCall = t.callExpression(
                 t.identifier(`_u${shortName}`),
@@ -149,8 +149,9 @@ function transformCode(
       comments: false,
       compact: true,
     }).code.replace(/;$/, '')
-  } catch (_e) {
-    return code
+  } catch (e) {
+    logger.error('Failed to parse or transform code:', e)
+    throw e
   }
 }
 
@@ -212,16 +213,14 @@ export function generateAppJs(context: ComponentContext) {
 
   const templateDecls = showInsts
     .map(si => {
-      // biome-ignore lint/style/noNonNullAssertion: filtered
-      const tId = si.templateId!.replace(/-/g, '_')
+      const tId = (si.templateId ?? 'unknown').replace(/-/g, '_')
       return `  const _tmpl_${tId} = document.getElementById('${si.templateId}');`
     })
     .join('\n')
 
   const rebindFns = showInsts
     .map(si => {
-      // biome-ignore lint/style/noNonNullAssertion: filtered
-      const tId = si.templateId!.replace(/-/g, '_')
+      const tId = (si.templateId ?? 'unknown').replace(/-/g, '_')
       const internalInsts = instructions.filter(
         i =>
           i.selector !== si.selector &&
@@ -241,10 +240,10 @@ export function generateAppJs(context: ComponentContext) {
 
   const stateDecls = nodes
     .filter(n => n.type === 'state')
-    .map(
-      // biome-ignore lint/suspicious/noExplicitAny: json stringify
-      n => `  let ${idToShort.get(n.id)} = ${JSON.stringify((n as any).value)};`
-    )
+    .map(n => {
+      const stateNode = n as StateNode
+      return `  let ${idToShort.get(n.id)} = ${JSON.stringify(stateNode.value)};`
+    })
     .join('\n')
 
   const derivedDecls = nodes
@@ -278,7 +277,7 @@ export function generateAppJs(context: ComponentContext) {
       if (!node.templateBody || node.isExpression) {
         const transformed = transformCode(
           fnStr,
-          node.context || context,
+          (node.context as ComponentContext | undefined) || context,
           idToShort
         )
         return `  const ${name} = ${transformed};`
@@ -409,7 +408,8 @@ export function generateAppJs(context: ComponentContext) {
                       let hBody = handlerNode.fn.toString()
                       hBody = transformCode(
                         hBody,
-                        handlerNode.context || context,
+                        (handlerNode.context as ComponentContext | undefined) ||
+                          context,
                         idToShort,
                         true
                       )
@@ -427,16 +427,16 @@ export function generateAppJs(context: ComponentContext) {
             let slotFnsStr = '[]'
             const allItemFns = (i.itemInstructions || [])
               .filter(ii => ii.itemFns)
-              .flatMap(ii => ii.itemFns!)
+              .flatMap(ii => ii.itemFns ?? [])
             if (allItemFns.length > 0) {
               const transformedSlots = (i.itemInstructions || [])
                 .filter(ii => ii.itemFns)
                 .flatMap(ii => {
-                  return ii.itemFns!.map(fnStr => {
+                  return (ii.itemFns ?? []).map(fnStr => {
                     const withParam = fnStr.replace(/^\(\)\s*=>/, '(item) =>')
                     return transformCode(
                       withParam,
-                      ii.context || context,
+                      (ii.context as ComponentContext | undefined) || context,
                       idToShort,
                       true
                     )
