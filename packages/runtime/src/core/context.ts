@@ -26,13 +26,13 @@ export class ComponentContext {
     return id
   }
 
-  addDerived(key: string, fn: (...args: unknown[]) => unknown, deps: string[]) {
+  addDerived(key: string, fn: unknown, deps: string[]) {
     const id = this.createId('d')
     const node: ComponentNode = {
       id,
       key,
       type: 'derived',
-      fn,
+      fn: fn as (...args: unknown[]) => unknown,
       deps,
       context: this,
     }
@@ -41,13 +41,13 @@ export class ComponentContext {
     return id
   }
 
-  addHandler(key: string, fn: (...args: unknown[]) => void, deps: string[]) {
+  addHandler(key: string, fn: unknown, deps: string[]) {
     const id = this.createId('h')
     const node: ComponentNode = {
       id,
       key,
       type: 'handler',
-      fn,
+      fn: fn as (...args: unknown[]) => void,
       deps,
       context: this,
     }
