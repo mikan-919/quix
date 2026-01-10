@@ -10,7 +10,8 @@
   },
   "formatter": {
     "enabled": true,
-    "indentStyle": "space"
+    "indentStyle": "space",
+    "lineWidth": 120
   },
   "linter": {
     "enabled": true,
@@ -42,6 +43,16 @@
         "rules": {
           "suspicious": {
             "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["playground/src/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useExcessPairs": "error"
           }
         }
       }
