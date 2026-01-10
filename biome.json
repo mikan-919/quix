@@ -46,16 +46,6 @@
           }
         }
       }
-    },
-    {
-      "includes": ["playground/src/**/*.tsx"],
-      "linter": {
-        "rules": {
-          "style": {
-            "useExcessPairs": "off"
-          }
-        }
-      }
     }
   ]
 }

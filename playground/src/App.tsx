@@ -23,20 +23,13 @@ const App = component('App')
           style='position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;'
           data-testid='modal-backdrop'
         >
-          <div
-            style='background:white;padding:2rem;border-radius:8px;max-width:400px;'
-            data-testid='modal-content'
-          >
+          <div style='background:white;padding:2rem;border-radius:8px;max-width:400px;' data-testid='modal-content'>
             <h2 style='margin:0 0 1rem 0;'>Modal Title</h2>
             <p>This modal is used for E2E testing.</p>
           </div>
         </div>
       </Show>
-      <button
-        type='button'
-        onclick={handlers.toggleModal}
-        data-testid='open-modal'
-      >
+      <button type='button' onclick={handlers.toggleModal} data-testid='open-modal'>
         Open Modal
       </button>
     </div>
