@@ -218,4 +218,42 @@ describe('Code Generator: Forコンポーネントの詳細テスト', () => {
     expect(output).toContain('node._q_texts')
     expect(output).toContain('tn.textContent !== val')
   })
+
+  test('Showコンポーネント: onclickハンドラがrebind関数内で再アタッチされること', () => {
+    const ctx = new ComponentContext('Test')
+    ctx.addState('visible', true)
+    const visibleId = ctx.getNodeByKey('visible')?.id
+
+    ctx.addHandler('close', (_s: unknown) => {}, [])
+    const handlerId = ctx.getNodeByKey('close')?.id
+
+    ctx.instructions.push({
+      // biome-ignore lint/style/noNonNullAssertion: testing
+      signalId: visibleId!,
+      selector: '.modal-anchor',
+      action: 'show',
+      template: '<div class="close-btn"></div>',
+      templateId: 'tmpl-modal',
+    })
+
+    if (handlerId) {
+      ctx.instructions.push({
+        signalId: handlerId,
+        selector: '.close-btn',
+        action: 'addListener',
+        attrName: 'click',
+      })
+    }
+
+    const output = generateAppJs(ctx)
+
+    // rebind関数が定義されていること
+    expect(output).toContain('function _u_rebind_tmpl_modal()')
+
+    // rebind関数内でaddEventListenerが呼ばれていること
+    expect(output).toContain("addEventListener('click',")
+
+    // rebind関数がshow命令内で呼び出されていること
+    expect(output).toMatch(/_u_rebind_tmpl_modal\(\)/)
+  })
 })
