@@ -15,16 +15,17 @@ import type {
 
 const logger = consola.withTag('Quix:Runtime')
 export function h(tag: unknown, props: unknown, ...children: unknown[]): VNode {
+  const logger = consola.withTag('Quix:Runtime')
   // 1 & 2. Component/Symbols 処理 (既存通り)
   if (tag instanceof ComponentBuilder || tag?.__quix_builder)
     return handleComponent(tag, props)
   if (tag === Show) {
     logger.trace('Processing <Show> block')
-    return handleShow(props, children)
+    return handleShow(props as { when: () => unknown }, children)
   }
   if (tag === For) {
     logger.trace('Processing <For> loop')
-    return handleFor(props, children)
+    return handleFor(props as { each: () => unknown[] }, children)
   }
 
   // 3. Normal HTML Tags
