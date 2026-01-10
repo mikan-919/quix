@@ -19,9 +19,9 @@ const App = component('App')
       <Display value={state.count() * 2} />
       <Show when={() => state.modalOpen()}>
         <div
-          onclick={handlers.toggleModal}
           style='position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;'
           data-testid='modal-backdrop'
+          onclick={handlers.toggleModal}
         >
           <div style='background:white;padding:2rem;border-radius:8px;max-width:400px;' data-testid='modal-content'>
             <h2 style='margin:0 0 1rem 0;'>Modal Title</h2>
