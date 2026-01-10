@@ -1,13 +1,17 @@
-import generate from '@babel/generator'
+import _generate from '@babel/generator'
 import { parse } from '@babel/parser'
 import type { NodePath } from '@babel/traverse'
-import traverse from '@babel/traverse'
+import _traverse from '@babel/traverse'
 import * as t from '@babel/types'
 import consola from 'consola'
 import type { ComponentContext } from '../core/context'
 import type { DerivedNode, StateNode } from '../core/types'
 
 const logger = consola.withTag('Quix:Codegen')
+
+// Handle ESM/CJS interop for Babel modules
+const traverse = (_traverse as any).default || _traverse
+const generate = (_generate as any).default || _generate
 
 // AST変換関数 (transformCode) は変更なし
 function transformCode(
