@@ -13,8 +13,6 @@ export interface ForProps<T = unknown> {
 
 export type ForComponent = unknown
 
-export const For: ForComponent = null
-
 export function handleFor<T>(props: ForProps<T>, children: unknown[]): VNode {
   /*
    * Forコンポーネント: リストレンダリング

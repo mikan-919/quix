@@ -4,13 +4,11 @@ export * from './core/builder'
 export type { ComponentContext } from './core/context'
 // Components (Symbols)
 export * from './core/symbols'
-export * from './core/components/For'
-export * from './core/components/Show'
 export type {
+  ForComponent,
   Instruction,
   QuixComponent,
-  VNode,
-  ForComponent,
   ShowComponent,
+  VNode,
 } from './core/types'
 export * from './h'
