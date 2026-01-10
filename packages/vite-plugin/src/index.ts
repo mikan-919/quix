@@ -144,7 +144,8 @@ export function quixPlugin(): Plugin {
             format: 'esm',
           })
           return { code: result.code, map: null }
-        } catch (_e) {
+        } catch (e) {
+          logger.error('Failed to analyze and transform component:', e)
           // 解析に失敗した場合（構文エラーなど）、ここでは null を返して
           // Vite の標準的なエラーハンドリングや後続のプラグインに任せる。
           return null
