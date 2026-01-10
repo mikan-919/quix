@@ -1,4 +1,4 @@
-import { component, For, type QuixComponent } from '@quix/runtime'
+import { component, type QuixComponent } from '@quix/runtime'
 import z from 'zod'
 
 const Display = component('Display')
@@ -7,19 +7,33 @@ const Display = component('Display')
 
 const App: QuixComponent = component('App')
   .state('count', 10)
+  .state('modalOpen', false)
   .derived('double', ['count'], s => s.count() * 2)
   .handler('inc', ['count'], s => s.count(s.count() + 1))
-  .render(({ state, handlers }) => (
-    <div>
-      <h1>My new framework</h1>
-      <button type='button' onclick={handlers.inc}>
-        Count is: {state.count()}
-      </button>
-      <For each={Array.from({ length: state.count() }, (_, i) => i)}>
-        {item => <Display value={item()} />}
-      </For>
-      <Display value={state.double()} />
-    </div>
-  ))
+  .handler('toggleModal', ['modalOpen'], s => s.modalOpen(!s.modalOpen()))
+  .render(({ state, handlers }) => {
+    return (
+      <div>
+        <h1>My new framework</h1>
+        <button type='button' onclick={handlers.inc}>
+          Count is: {state.count()}
+        </button>
+        <Display value={state.double()} />
+        <div data-testid='modal-backdrop'>
+          <div style='display:none;' data-testid='modal-content'>
+            <h2>Modal Title</h2>
+            <p>This modal is used for E2E testing.</p>
+          </div>
+        </div>
+        <button
+          type='button'
+          onclick={handlers.toggleModal}
+          data-testid='open-modal'
+        >
+          Open Modal
+        </button>
+      </div>
+    )
+  })
 
 export default App

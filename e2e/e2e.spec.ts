@@ -84,4 +84,87 @@ test.describe('E2E Tests: エンドツーエンドテスト', () => {
 
     await expect(errors).toHaveLength(0)
   })
+
+  test('Show component: モーダルが初期状態で非表示であること', async ({
+    page,
+  }) => {
+    await page.goto('/')
+
+    const modalBackdrop = page.getByTestId('modal-backdrop')
+    const modalContent = page.getByTestId('modal-content')
+    const modalClose = page.getByTestId('modal-close')
+
+    await expect(modalBackdrop).toBeHidden()
+    await expect(modalContent).toBeHidden()
+    await expect(modalClose).toBeHidden()
+  })
+
+  test('Show component: モーダルが開くときに表示されること', async ({
+    page,
+  }) => {
+    await page.goto('/')
+
+    const openModalButton = page.getByTestId('open-modal')
+    await openModalButton.click()
+
+    const modalBackdrop = page.getByTestId('modal-backdrop')
+    const modalContent = page.getByTestId('modal-content')
+    const modalClose = page.getByTestId('modal-close')
+    const modalTitle = page.getByRole('heading', { name: 'Modal Title' })
+
+    await expect(modalBackdrop).toBeVisible()
+    await expect(modalContent).toBeVisible()
+    await expect(modalClose).toBeVisible()
+    await expect(modalTitle).toBeVisible()
+  })
+
+  test('Show component: モーダルの×ボタンで閉じられること', async ({
+    page,
+  }) => {
+    await page.goto('/')
+
+    const openModalButton = page.getByTestId('open-modal')
+    await openModalButton.click()
+
+    const modalBackdrop = page.getByTestId('modal-backdrop')
+    await expect(modalBackdrop).toBeVisible()
+
+    const modalClose = page.getByTestId('modal-close')
+    await modalClose.click()
+
+    await expect(modalBackdrop).toBeHidden()
+  })
+
+  test('Show component: モーダル背景クリックで閉じられること', async ({
+    page,
+  }) => {
+    await page.goto('/')
+
+    const openModalButton = page.getByTestId('open-modal')
+    await openModalButton.click()
+
+    const modalBackdrop = page.getByTestId('modal-backdrop')
+    await expect(modalBackdrop).toBeVisible()
+
+    await modalBackdrop.click()
+
+    await expect(modalBackdrop).toBeHidden()
+  })
+
+  test('Show component: モーダルコンテンツクリックで閉じないこと', async ({
+    page,
+  }) => {
+    await page.goto('/')
+
+    const openModalButton = page.getByTestId('open-modal')
+    await openModalButton.click()
+
+    const modalBackdrop = page.getByTestId('modal-backdrop')
+    await expect(modalBackdrop).toBeVisible()
+
+    const modalContent = page.getByTestId('modal-content')
+    await modalContent.click()
+
+    await expect(modalBackdrop).toBeVisible()
+  })
 })
