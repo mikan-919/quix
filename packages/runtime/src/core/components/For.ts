@@ -7,11 +7,14 @@ import type {
   VNode,
 } from '../types'
 
-export interface ForProps {
-  each: () => unknown[]
+export interface ForProps<T = unknown> {
+  each: () => T[]
 }
 
-export function handleFor(props: ForProps, children: unknown[]): VNode {
+export type ForComponent<T> = (props: ForProps<T>, children: (item: () => T) => VNode
+export const For: ForComponent<unknown>
+
+export function handleFor<T>(props: ForProps<T>, children: unknown[]): VNode {
   /*
    * Forコンポーネント: リストレンダリング
    * items: Signal<any[]>
@@ -83,7 +86,7 @@ export function handleFor(props: ForProps, children: unknown[]): VNode {
 
       // SLOT_MARKER を <q-text> にすべて置換
       if (vnode.html.includes(SLOT_MARKER)) {
-        templateHtml = vnode.html.replaceAll(SLOT_MARKER, SLOT_REPLACEMENT)
+        templateHtml = vnode.html.split(SLOT_MARKER).join(SLOT_REPLACEMENT)
       } else {
         const match = vnode.html.match(/^(<[^>]+>)(.*)(<\/[^>]+>)$/)
         if (match) {
