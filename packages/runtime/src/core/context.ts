@@ -26,8 +26,7 @@ export class ComponentContext {
     return id
   }
 
-  // biome-ignore lint/complexity/noBannedTypes: generic function storage
-  addDerived(key: string, fn: Function, deps: string[]) {
+  addDerived(key: string, fn: (...args: unknown[]) => unknown, deps: string[]) {
     const id = this.createId('d')
     const node: ComponentNode = {
       id,
@@ -42,8 +41,7 @@ export class ComponentContext {
     return id
   }
 
-  // biome-ignore lint/complexity/noBannedTypes: generic function storage
-  addHandler(key: string, fn: Function, deps: string[]) {
+  addHandler(key: string, fn: (...args: unknown[]) => void, deps: string[]) {
     const id = this.createId('h')
     const node: ComponentNode = {
       id,
