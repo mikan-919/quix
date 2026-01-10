@@ -38,6 +38,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bun-
 
+      - name: Install dependencies
+        run: bun install
+
       - name: Cache Cargo registry
         uses: actions/cache@v4
         with:
@@ -94,3 +97,4 @@ jobs:
             if [ -n "$DEV_SERVER_PID" ]; then
               kill $DEV_SERVER_PID || true
             fi
+          fi
