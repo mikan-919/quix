@@ -8,17 +8,18 @@ const Display = component('Display')
 const App: QuixComponent = component('App')
   .state('count', 10)
   .state('modalOpen', false)
-  .derived('double', ['count'], s => s.count() * 2)
   .handler('inc', ['count'], s => s.count(s.count() + 1))
   .handler('toggleModal', ['modalOpen'], s => s.modalOpen(!s.modalOpen()))
   .render(({ state, handlers }) => {
+    const doubleValue = state.count() * 2
+
     return (
       <div>
         <h1>My new framework</h1>
         <button type='button' onclick={handlers.inc}>
           Count is: {state.count()}
         </button>
-        <Display value={state.double()} />
+        <Display value={doubleValue} />
         <div data-testid='modal-backdrop'>
           <div style='display:none;' data-testid='modal-content'>
             <h2>Modal Title</h2>
