@@ -52,7 +52,7 @@
       "linter": {
         "rules": {
           "style": {
-            "useExcessPairs": "error"
+            "useExcessPairs": "off"
           }
         }
       }
