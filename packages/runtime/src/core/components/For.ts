@@ -11,8 +11,9 @@ export interface ForProps<T = unknown> {
   each: () => T[]
 }
 
-export type ForComponent<T> = (props: ForProps<T>, children: (item: () => T) => VNode
-export const For: ForComponent<unknown>
+export type ForComponent = unknown
+
+export const For: ForComponent = null
 
 export function handleFor<T>(props: ForProps<T>, children: unknown[]): VNode {
   /*

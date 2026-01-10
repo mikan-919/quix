@@ -62,20 +62,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-build-
 
-      - name: Build wasm
-        run: bun run build
-
       - name: Run Biome check
         run: bunx biome check --write
 
       - name: Run unit tests
         run: bun test
-
-      - name: Start dev server in background
-        run: |
-          bun --filter playground dev &
-          DEV_SERVER_PID=$!
-          echo "DEV_SERVER_PID=$DEV_SERVER_PID" >> $GITHUB_ENV
 
       - name: Cache Playwright browsers
         id: playwright-cache
@@ -103,4 +94,3 @@ jobs:
             if [ -n "$DEV_SERVER_PID" ]; then
               kill $DEV_SERVER_PID || true
             fi
-          fi

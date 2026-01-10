@@ -11,8 +11,9 @@ export interface ShowProps {
   when: () => unknown
 }
 
-export type ShowComponent = (props: ShowProps, children: VNode) => VNode
-export const Show: ShowComponent
+export type ShowComponent = unknown
+
+export const Show: ShowComponent = null
 
 export function handleShow(props: ShowProps, children: unknown[]): VNode {
   const qid = generateId('q')
