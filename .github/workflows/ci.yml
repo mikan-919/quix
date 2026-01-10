@@ -65,6 +65,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-build-
 
+      - name: Build all packages
+        run: bun run build
+
       - name: Run Biome check
         run: bunx biome check --write
 
