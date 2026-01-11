@@ -17,7 +17,7 @@ const App = component('App')
     return (
       <div>
         <h1>My new framework</h1>
-        <button type='button' onclick={handlers.inc}>
+        <button type='button' onclick={handlers.inc} data-testid='counter-button'>
           Count is: {state.count()}/
         </button>
         <Display value={state.count() * 2} />

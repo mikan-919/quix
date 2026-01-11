@@ -7,8 +7,8 @@ test.describe('E2E Tests: エンドツーエンドテスト', () => {
     const h1 = page.getByRole('heading', { level: 1, name: 'My new framework' })
     await expect(h1).toBeVisible()
 
-    const button = page.getByRole('button')
-    await expect(button).toHaveText(/Count is:10/)
+    const button = page.getByTestId('counter-button')
+    await expect(button).toHaveText('Count is:10/')
 
     const doubleHeading = page.getByRole('heading', {
       level: 2,
@@ -30,11 +30,11 @@ test.describe('E2E Tests: エンドツーエンドテスト', () => {
   test('State update: ボタンクリックでカウンターと派生状態が更新されること', async ({ page }) => {
     await page.goto('/')
 
-    const button = page.getByRole('button')
-    await expect(button).toHaveText(/Count is:10/)
+    const button = page.getByTestId('counter-button')
+    await expect(button).toHaveText('Count is:10/')
 
     await button.click()
-    await expect(button).toHaveText(/Count is:11/)
+    await expect(button).toHaveText('Count is:11/')
 
     const doubleHeading = page.getByRole('heading', { level: 2 })
     await expect(doubleHeading.filter({ hasText: 'Double:22' })).toBeVisible()
@@ -46,14 +46,14 @@ test.describe('E2E Tests: エンドツーエンドテスト', () => {
   test('Consecutive updates: ボタンを複数回クリックして正しく更新されること', async ({ page }) => {
     await page.goto('/')
 
-    const button = page.getByRole('button')
+    const button = page.getByTestId('counter-button')
 
     for (let i = 0; i < 5; i++) {
       await button.click()
-      await expect(button).toHaveText(new RegExp(`Count is:${10 + i + 1}`))
+      await expect(button).toHaveText(`Count is:${10 + i + 1}/`)
     }
 
-    await expect(button).toHaveText(/Count is:15/)
+    await expect(button).toHaveText('Count is:15/')
     await expect(page.getByRole('heading', { level: 2, name: 'Double:30' })).toBeVisible()
 
     const h2Elements = page.locator('h2').filter({ hasText: /^Double:/ })
