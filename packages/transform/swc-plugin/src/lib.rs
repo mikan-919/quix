@@ -147,7 +147,15 @@ impl VisitMut for TransformVisitor {
                     };
 
                     props_props.push(PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
-                        key: PropName::Ident(Ident::new(key_str, DUMMY_SP)),
+                        key: if key_str.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$') {
+                            PropName::Ident(Ident::new(key_str, DUMMY_SP))
+                        } else {
+                            PropName::Str(Str {
+                                span: DUMMY_SP,
+                                value: key_str.into(),
+                                raw: None,
+                            })
+                        },
                         value: Box::new(value),
                     }))));
                 }
