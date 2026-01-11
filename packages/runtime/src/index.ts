@@ -5,8 +5,10 @@ export type { ComponentContext } from './core/context'
 // Components (Symbols)
 export * from './core/symbols'
 export type {
+  ForComponent,
   Instruction,
   QuixComponent,
+  ShowComponent,
   VNode,
 } from './core/types'
 export * from './h'

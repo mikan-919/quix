@@ -12,12 +12,10 @@ const App: QuixComponent = component('App')
   .render(({ state, handlers }) => (
     <div>
       <h1>My new framework</h1>
-      <button type='button' onclick={handlers.inc}>
+      <button type='button' onclick={handlers.inc} data-testid='counter-button'>
         Count is: {state.count()}
       </button>
-      <For each={Array.from({ length: state.count() }, (_, i) => i)}>
-        {item => <Display value={item()} />}
-      </For>
+      <For each={Array.from({ length: state.count() }, (_, i) => i)}>{item => <Display value={item()} />}</For>
       <Display value={state.double()} />
     </div>
   ))

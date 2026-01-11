@@ -6,6 +6,6 @@
     "noEmit": false,
     "allowImportingTsExtensions": false
   },
-  "include": ["src/compiler/**/*"],
+  "include": ["src/compiler/**/*", "src/core/types.ts"],
   "exclude": ["node_modules", "dist"]
 }

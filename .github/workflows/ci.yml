@@ -5,6 +5,12 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip running E2E tests (default: false)'
+        required: false
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,7 +19,8 @@ jobs:
   test:
     name: Run all tests
     runs-on: ubuntu-latest
-
+    if: github.event.inputs.skip_tests != 'true'
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,6 +29,9 @@ jobs:
         uses: oven-sh/setup-bun@v1
         with:
           bun-version: latest
+
+      - name: Install Rust toolchain
+        run: rustup target add wasm32-wasip1
 
       - name: Cache Bun
         uses: actions/cache@v4
@@ -33,12 +43,6 @@ jobs:
 
       - name: Install dependencies
         run: bun install
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: wasm32-wasip1
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -64,7 +68,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-build-
 
-      - name: Build wasm
+      - name: Build all packages
         run: bun run build
 
       - name: Run Biome check
@@ -88,3 +92,15 @@ jobs:
 
       - name: Run E2E tests
         run: bun test:e2e
+        env:
+          DEV_SERVER_PID: ${{ steps.start-dev-server.outputs.DEV_SERVER_PID }}
+
+      - name: Stop dev server
+        if: always()
+        run: |
+          if [ -f "$GITHUB_ENV" ]; then
+            source "$GITHUB_ENV"
+            if [ -n "$DEV_SERVER_PID" ]; then
+              kill $DEV_SERVER_PID || true
+            fi
+          fi

@@ -24,7 +24,7 @@ export interface DerivedNode extends NodeBase {
 
 export interface HandlerNode extends NodeBase {
   type: 'handler'
-  fn: (...args: unknown[]) => void
+  fn: (...args: unknown[]) => void // Internal function storage, Builder provides stricter typing
   deps: string[]
 }
 
@@ -45,10 +45,10 @@ export interface Instruction {
   attrName?: string
   template?: string
   templateId?: string
-  listFn?: string
-  itemSlots?: string[]
-  itemFns?: string[]
-  itemInstructions?: Instruction[]
+  listFn?: string // For用: each関数の文字列表現
+  itemSlots?: string[] // For用: 各q-textスロットを更新するための関数の配列表現
+  itemFns?: string[] // For用: テキストノード内の各動的分を更新するための関数の文字列表現
+  itemInstructions?: Instruction[] // For用: 各アイテム内で実行される命令
   context?: unknown
 }
 
@@ -59,23 +59,33 @@ export interface HiddenDerivedRequest {
   isExpression?: boolean
 }
 
+// ⬇️ ここから追加: 型推論用ユーティリティ
+
+// 交差型を綺麗に畳み込む（ツールチップで見やすくする）
 export type Simplify<T> = { [K in keyof T]: T[K] } & {}
 
+// Getter専用: Derived内での状態アクセス用
+// { count: number } -> { count: () => number }
 export type ToReader<T> = { [K in keyof T]: () => T[K] }
 
+// Signal (Getter/Setter両用): Handler内での状態アクセス用
+// value() で取得、value(newVal) で更新
 export type Signal<V> = {
   (): V
   (newValue: V): void
 }
 
+// { count: number } -> { count: Signal<number> }
 export type ToSignal<T> = { [K in keyof T]: Signal<T[K]> }
 export type ToPropsSignal<T> = {
   [K in keyof T]: () => T[K]
 }
 
+// ⭐️ Builder の内部状態用の型
 export interface ComponentMetadata {
   name: string
   propsSchema?: z.ZodObject<z.ZodRawShape>
+  // ロジックを保持しておき、親の render 時に再実行できるようにする
   setupFns: {
     state: Array<{ key: string; valueOrFn: unknown }>
     derived: Array<{
@@ -92,13 +102,12 @@ export interface ComponentMetadata {
   }
 }
 
-// Use a more specific type for QuixComponent that satisfies both constraints
-type ComponentContext = import('./context').ComponentContext
-export type QuixComponent<P> = ComponentContext & {
+type ComponentContext = import('./context').ComponentContext;
+export type QuixComponent<P = unknown> = ComponentContext & {
   (props: P): VNode
   __quix_builder?: unknown
-}
+};
 
-// Simplify types - these will be replaced with proper types when Show/For usage is clarified
-export type ForComponent = unknown
-export type ShowComponent = unknown
+// Built-in component types for JSX
+export type ForComponent<T> = (props: { each: () => T[] }, children: (item: () => T) => VNode
+export type ShowComponent = (props: { when: () => boolean }, children: unknown[]) => VNode

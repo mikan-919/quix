@@ -134,17 +134,28 @@ impl VisitMut for TransformVisitor {
                             }
                         }
                         Some(JSXAttrValue::JSXFragment(frag)) => {
+                             let mut converted = Expr::JSXFragment(frag.clone());
+                             converted.visit_mut_with(self);
+
                              if key_str.starts_with("on") {
-                                 Expr::JSXFragment(frag.clone())
+                                 converted
                              } else {
-                                 create_arrow_function(Expr::JSXFragment(frag.clone()))
+                                 create_arrow_function(converted)
                              }
                         }
                         None => Expr::Lit(Lit::Bool(Bool { span: DUMMY_SP, value: true })),
                     };
 
                     props_props.push(PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
-                        key: PropName::Ident(Ident::new(key_str, DUMMY_SP)),
+                        key: if key_str.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$') {
+                            PropName::Ident(Ident::new(key_str, DUMMY_SP))
+                        } else {
+                            PropName::Str(Str {
+                                span: DUMMY_SP,
+                                value: key_str.into(),
+                                raw: None,
+                            })
+                        },
                         value: Box::new(value),
                     }))));
                 }

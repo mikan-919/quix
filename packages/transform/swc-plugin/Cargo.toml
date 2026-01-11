@@ -6,6 +6,11 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
+[profile.release]
+lto = true
+opt-level = "z"
+strip = true
+
 [dependencies]
 swc_core = { version = "0.90.*", features = ["ecma_plugin_transform", "ecma_ast", "ecma_visit", "ecma_utils", "common", "ecma_quote"] }
 serde = { version = "=1.0.197", features = ["derive"] }
