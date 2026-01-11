@@ -11,7 +11,7 @@ const App = component('App')
   .handler('inc', ['count'], s => s.count(s.count() + 1))
   .handler('toggleModal', ['modalOpen'], s => s.modalOpen(!s.modalOpen()))
   .render(({ state, handlers }) => {
-    const backdropStyle = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);'
+    const modalStyle = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);'
     const contentStyle = 'background:white;padding:2rem;max-width:400px;margin:auto;'
     const titleStyle = 'margin:0 0 1rem 0;'
     return (
@@ -22,7 +22,7 @@ const App = component('App')
         </button>
         <Display value={state.count() * 2} />
         {state.modalOpen() && (
-          <div style={backdropStyle} data-testid='modal-backdrop' onclick={handlers.toggleModal}>
+          <div style={modalStyle} data-testid='modal-backdrop' onclick={handlers.toggleModal}>
             <div style={contentStyle} data-testid='modal-content'>
               <h2 style={titleStyle}>Modal Title</h2>
               <p>This modal is used for E2E testing.</p>
