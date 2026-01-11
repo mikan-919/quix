@@ -18,7 +18,7 @@ const App = component('App')
       <div>
         <h1>My new framework</h1>
         <button type='button' onclick={handlers.inc}>
-          Count is: {state.count()}
+          Count is: {state.count()}/
         </button>
         <Display value={state.count() * 2} />
         {state.modalOpen() && (
