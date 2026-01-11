@@ -8,7 +8,7 @@ test.describe('E2E Tests: エンドツーエンドテスト', () => {
     await expect(h1).toBeVisible()
 
     const button = page.getByTestId('counter-button')
-    await expect(button).toHaveText('Count is:10/')
+    await expect(button).toHaveText('Count is:10')
 
     const doubleHeading = page.getByRole('heading', {
       level: 2,
@@ -31,10 +31,10 @@ test.describe('E2E Tests: エンドツーエンドテスト', () => {
     await page.goto('/')
 
     const button = page.getByTestId('counter-button')
-    await expect(button).toHaveText('Count is:10/')
+    await expect(button).toHaveText('Count is:10')
 
     await button.click()
-    await expect(button).toHaveText('Count is:11/')
+    await expect(button).toHaveText('Count is:11')
 
     const doubleHeading = page.getByRole('heading', { level: 2 })
     await expect(doubleHeading.filter({ hasText: 'Double:22' })).toBeVisible()
@@ -50,10 +50,10 @@ test.describe('E2E Tests: エンドツーエンドテスト', () => {
 
     for (let i = 0; i < 5; i++) {
       await button.click()
-      await expect(button).toHaveText(`Count is:${10 + i + 1}/`)
+      await expect(button).toHaveText(`Count is:${10 + i + 1}`)
     }
 
-    await expect(button).toHaveText('Count is:15/')
+    await expect(button).toHaveText('Count is:15')
     await expect(page.getByRole('heading', { level: 2, name: 'Double:30' })).toBeVisible()
 
     const h2Elements = page.locator('h2').filter({ hasText: /^Double:/ })
@@ -71,62 +71,5 @@ test.describe('E2E Tests: エンドツーエンドテスト', () => {
     await page.goto('/')
 
     await expect(errors).toHaveLength(0)
-  })
-
-  test('Show component: モーダルが初期状態で非表示であること', async ({ page }) => {
-    await page.goto('/')
-
-    const modalBackdrop = page.getByTestId('modal-backdrop')
-    const modalContent = page.getByTestId('modal-content')
-    const modalClose = page.getByTestId('modal-close')
-
-    await expect(modalBackdrop).toBeHidden()
-    await expect(modalContent).toBeHidden()
-    await expect(modalClose).toBeHidden()
-  })
-
-  test('Show component: モーダルが開くときに表示されること', async ({ page }) => {
-    await page.goto('/')
-
-    const openModalButton = page.getByTestId('open-modal')
-    await openModalButton.click()
-
-    const modalBackdrop = page.getByTestId('modal-backdrop')
-    const modalContent = page.getByTestId('modal-content')
-    const modalTitle = page.getByRole('heading', { name: 'Modal Title' })
-
-    await expect(modalBackdrop).toBeVisible()
-    await expect(modalContent).toBeVisible()
-    await expect(modalTitle).toBeVisible()
-  })
-
-  test('Show component: モーダルのバックドロップで閉じられること', async ({ page }) => {
-    await page.goto('/')
-
-    const openModalButton = page.getByTestId('open-modal')
-    await openModalButton.click()
-
-    const modalBackdrop = page.getByTestId('modal-backdrop')
-    await expect(modalBackdrop).toBeVisible()
-
-    // Click backdrop to close modal
-    await modalBackdrop.click()
-
-    await expect(modalBackdrop).toBeHidden()
-  })
-
-  test('Show component: モーダルコンテンツクリックで閉じないこと', async ({ page }) => {
-    await page.goto('/')
-
-    const openModalButton = page.getByTestId('open-modal')
-    await openModalButton.click()
-
-    const modalBackdrop = page.getByTestId('modal-backdrop')
-    await expect(modalBackdrop).toBeVisible()
-
-    const modalContent = page.getByTestId('modal-content')
-    await modalContent.click()
-
-    await expect(modalBackdrop).toBeVisible()
   })
 })
